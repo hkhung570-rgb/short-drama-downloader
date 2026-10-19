@@ -1,0 +1,15 @@
+# 下载产物与运行数据
+downloads/
+data/
+
+# Python
+__pycache__/
+*.pyc
+
+# 第三方程序(二进制，非本项目源码)
+Gopeed/
+
+# 临时文件
+*.tmp
+*.part
+*.temp.mp4

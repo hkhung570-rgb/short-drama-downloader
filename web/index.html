@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>短剧批量下载与管理平台 | Short Drama Downloader</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3.4.38/dist/vue.global.prod.js"></script>
+    <style>
+        [v-cloak] { display: none; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+<div id="app" v-cloak class="flex flex-col min-h-screen">
+    <!-- 顶部导航条 -->
+    <header class="bg-slate-900 border-b border-slate-800 sticky top-0 z-40 px-6 py-4 flex items-center justify-between flex-wrap gap-3">
+        <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center text-xl shadow-lg shadow-indigo-500/30">🎬</div>
+            <div>
+                <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2 flex-wrap">
+                    短剧批量下载与协同平台
+                    <span class="text-xs px-2 py-0.5 rounded-full border font-medium"
+                          :class="hwAccel ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-slate-700/60 text-slate-300 border-slate-600'">
+                        {{ system.encoder ? system.encoder_desc : '编码器检测中...' }}
+                    </span>
+                </h1>
+                <p class="text-xs text-slate-400">ReelShort · Slitz · 黄果短剧 · 智能压缩 · 全员协作
+                    <span v-if="system.disk_free_gb !== null && system.disk_free_gb !== undefined"> · 磁盘剩余 {{ system.disk_free_gb }} GB</span>
+                </p>
+            </div>
+        </div>
+
+        <div class="flex items-center bg-slate-800/80 rounded-lg p-1 text-xs">
+            <button @click="activeTab = 'create'" :class="tabCls('create')" class="px-3 py-1.5 rounded-md transition">⚡ 极速下载</button>
+            <button @click="activeTab = 'tasks'" :class="tabCls('tasks')" class="px-3 py-1.5 rounded-md transition flex items-center gap-1.5">
+                📋 任务队列
+                <span v-if="activeCount > 0" class="min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-amber-400 text-slate-900 text-[10px] font-bold flex items-center justify-center">{{ activeCount }}</span>
+            </button>
+            <button @click="activeTab = 'dramas'; loadDramas()" :class="tabCls('dramas')" class="px-3 py-1.5 rounded-md transition">📚 资产库 ({{ stats.total_dramas }}部)</button>
+            <button @click="activeTab = 'ai'" :class="tabCls('ai')" class="px-3 py-1.5 rounded-md transition">🤖 AI 助手</button>
+        </div>
+    </header>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto px-6 py-6 space-y-6">
+
+        <!-- TAB 1: 极速创建下载 -->
+        <section v-if="activeTab === 'create'" class="space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center space-x-4">
+                    <div class="w-12 h-12 rounded-lg bg-indigo-500/10 flex items-center justify-center text-2xl">📼</div>
+                    <div><div class="text-xs text-slate-400">已归档剧集</div>
+                        <div class="text-xl font-bold text-white">{{ stats.total_dramas }} <span class="text-xs font-normal text-slate-400">部</span></div></div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center space-x-4">
+                    <div class="w-12 h-12 rounded-lg bg-purple-500/10 flex items-center justify-center text-2xl">🎞️</div>
+                    <div><div class="text-xs text-slate-400">总视频集数</div>
+                        <div class="text-xl font-bold text-white">{{ stats.total_episodes }} <span class="text-xs font-normal text-slate-400">集</span></div></div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center space-x-4">
+                    <div class="w-12 h-12 rounded-lg bg-emerald-500/10 flex items-center justify-center text-2xl">💾</div>
+                    <div><div class="text-xs text-slate-400">归档总空间</div>
+                        <div class="text-xl font-bold text-white">{{ stats.total_size_gb }} <span class="text-xs font-normal text-slate-400">GB</span></div></div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center space-x-4">
+                    <div class="w-12 h-12 rounded-lg bg-amber-500/10 flex items-center justify-center text-2xl">⚡</div>
+                    <div><div class="text-xs text-slate-400">压缩编码器</div>
+                        <div class="text-sm font-bold text-amber-300">{{ system.encoder || '检测中...' }}</div></div>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+                <div>
+                    <h2 class="text-base font-semibold text-white">新建短剧下载任务</h2>
+                    <p class="text-xs text-slate-400 mt-1">粘贴 ReelShort / Slitz / 黄果短剧的详情页链接，系统自动识别平台。同一链接已有进行中的任务时不会重复创建。</p>
+                </div>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-medium text-slate-300 mb-1.5">剧目网址 (URL) 或 标识符</label>
+                        <div class="relative">
+                            <input v-model="form.url" @keyup.enter="submitDownload" type="text"
+                                   placeholder="例如: https://www.slitz.com/shorts/room-service 或 https://www.reelshort.com/movie/..."
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500 placeholder-slate-500 transition">
+                            <button v-if="form.url" @click="form.url = ''" class="absolute right-3 top-3 text-slate-400 hover:text-white">✕</button>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-950/60 p-4 rounded-xl border border-slate-800/80">
+                        <label class="flex items-center space-x-3 cursor-pointer">
+                            <input type="checkbox" v-model="form.auto_compress" class="w-4 h-4 rounded">
+                            <div><div class="text-sm font-medium text-slate-200">⚡ 智能压缩 (H.265)</div>
+                                <div class="text-xs text-slate-400">仅体积更小时才替换原片，约省 50%~70% 空间</div></div>
+                        </label>
+                        <label class="flex items-center space-x-3 cursor-pointer">
+                            <input type="checkbox" v-model="form.auto_zip" class="w-4 h-4 rounded">
+                            <div><div class="text-sm font-medium text-slate-200">📦 自动打包为 ZIP</div>
+                                <div class="text-xs text-slate-400">下载后自动归档压缩包便于发送</div></div>
+                        </label>
+                        <div class="flex items-center space-x-2">
+                            <span class="text-xs text-slate-300 whitespace-nowrap">限制集数:</span>
+                            <input v-model.number="form.max_eps" type="number" min="1" placeholder="全部"
+                                   class="w-24 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white">
+                            <span class="text-xs text-slate-500">(仅 ReelShort)</span>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-2 pt-1 text-xs text-slate-400">
+                        <span>常用快速填入：</span>
+                        <button @click="form.url = 'https://www.slitz.com/shorts/room-service'" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded text-slate-300">Slitz: Room Service</button>
+                        <button @click="form.url = 'https://www.slitz.com/shorts/behind-on-rent'" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded text-slate-300">Slitz: Behind on Rent</button>
+                        <button @click="form.url = '--latest 2'" class="px-2 py-1 bg-indigo-900/40 text-indigo-300 border border-indigo-700/50 rounded">🔥 自动抓取 ReelShort 最新 2 部</button>
+                    </div>
+
+                    <button @click="submitDownload" :disabled="submitting || !form.url.trim()"
+                            class="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-50 text-white font-medium py-3 rounded-xl shadow-lg shadow-indigo-600/30 transition">
+                        {{ submitting ? '🚀 正在派发任务...' : '🚀 开始全自动化下载与处理' }}
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 2: 任务队列 -->
+        <section v-if="activeTab === 'tasks'" class="space-y-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h2 class="text-base font-semibold text-white">下载与处理任务队列</h2>
+                    <p class="text-xs text-slate-400">最多同时执行 {{ system.workers || 2 }} 个任务，其余排队；压缩阶段始终串行以免抢占 GPU</p>
+                </div>
+                <div class="flex gap-2">
+                    <button @click="clearFinished" :disabled="!finishedCount" class="text-xs bg-slate-800 hover:bg-slate-700 disabled:opacity-40 px-3 py-1.5 rounded-lg text-slate-300 transition">🧹 清除已结束 ({{ finishedCount }})</button>
+                    <button @click="loadTasks" class="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-slate-300 transition">🔄 刷新</button>
+                </div>
+            </div>
+
+            <div v-if="tasks.length === 0" class="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center text-slate-500">
+                📭 暂无任务记录，点击【极速下载】创建第一个任务吧！
+            </div>
+
+            <div v-for="t in tasks" :key="t.id" class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3 shadow">
+                <div class="flex items-center justify-between gap-3 flex-wrap">
+                    <div class="flex items-center gap-2 min-w-0 flex-wrap">
+                        <span :class="statusCls(t.status)" class="text-xs px-2.5 py-1 rounded-full border font-medium">{{ statusText(t.status) }}</span>
+                        <span class="text-xs font-mono text-slate-400">#{{ t.id }}</span>
+                        <span class="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">{{ typeText(t.type) }}</span>
+                        <span class="text-xs px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800">{{ t.platform }}</span>
+                        <h3 class="text-sm font-semibold text-white truncate max-w-md" :title="t.target">{{ shortTarget(t) }}</h3>
+                    </div>
+                    <div class="text-xs text-slate-400">{{ t.created_at }}</div>
+                </div>
+
+                <div class="space-y-1.5">
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="text-slate-300 font-medium">{{ t.current_stage }}</span>
+                        <span class="text-indigo-400 font-bold">{{ t.progress }}%</span>
+                    </div>
+                    <div class="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
+                        <div :class="t.status === 'failed' ? 'bg-rose-500' : (t.status === 'completed' ? 'bg-emerald-500' : 'bg-gradient-to-r from-indigo-500 to-purple-500')"
+                             class="h-full transition-all duration-300" :style="{ width: t.progress + '%' }"></div>
+                    </div>
+                </div>
+
+                <div v-if="t.error" class="text-xs text-rose-300 bg-rose-950/40 border border-rose-900/60 rounded-lg px-3 py-2">❌ {{ t.error }}</div>
+                <div v-if="t.warning" class="text-xs text-amber-300 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">⚠️ {{ t.warning }}</div>
+
+                <div class="flex items-center justify-between gap-3 pt-2 text-xs text-slate-400 border-t border-slate-800/80">
+                    <div class="truncate text-slate-500 flex-1">最近日志: {{ t.last_log || '无' }}</div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <button @click="showLog(t)" class="text-indigo-400 hover:text-indigo-300 font-medium">日志 ({{ t.log_count }})</button>
+                        <button v-if="t.status === 'pending' || t.status === 'running'" @click="cancelTask(t)" class="px-2 py-1 rounded bg-rose-950/40 text-rose-300 border border-rose-900/60 hover:bg-rose-900/50">取消</button>
+                        <button v-if="t.status === 'failed' || t.status === 'cancelled'" @click="retryTask(t)" class="px-2 py-1 rounded bg-amber-950/40 text-amber-300 border border-amber-800/50 hover:bg-amber-900/60">重试</button>
+                        <button v-if="isFinished(t)" @click="deleteTask(t)" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400">删除</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 3: 资产管理库 -->
+        <section v-if="activeTab === 'dramas'" class="space-y-4">
+            <div class="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                    <h2 class="text-base font-semibold text-white">本地剧集资产库</h2>
+                    <p class="text-xs text-slate-400">按规范自动归档的短剧总览，支持在线试看与一键打包</p>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <input v-model="search" type="text" placeholder="搜索剧名..." class="bg-slate-800 border border-slate-700 text-xs rounded-lg px-3 py-1.5 text-slate-200 w-40">
+                    <select v-model="filterPlatform" class="bg-slate-800 border border-slate-700 text-xs rounded-lg px-3 py-1.5 text-slate-300">
+                        <option value="">全部平台</option>
+                        <option v-for="p in platformList" :key="p" :value="p">{{ p }}</option>
+                    </select>
+                    <button @click="loadDramas" class="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-slate-300">🔄 刷新</button>
+                </div>
+            </div>
+
+            <div v-if="filteredDramas.length === 0" class="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center text-slate-500">暂无匹配的剧集</div>
+
+            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                <div v-for="d in filteredDramas" :key="d.relative_path" class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden hover:border-slate-700 transition flex flex-col group shadow-lg">
+                    <div class="aspect-[9/14] bg-slate-950 relative overflow-hidden flex items-center justify-center">
+                        <img v-if="d.poster_url" :src="d.poster_url" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" loading="lazy">
+                        <div v-else class="text-slate-600 text-3xl">🎬</div>
+                        <span class="absolute top-2 left-2 text-[10px] px-2 py-0.5 rounded bg-black/70 text-white font-medium border border-white/10">{{ d.platform }}</span>
+                        <span class="absolute bottom-2 right-2 text-[10px] px-2 py-0.5 rounded bg-indigo-600/90 text-white font-semibold shadow">{{ d.episodes_count }} 集</span>
+                    </div>
+                    <div class="p-3.5 flex-1 flex flex-col justify-between space-y-2">
+                        <div>
+                            <h3 class="text-xs font-bold text-white line-clamp-1" :title="d.title">{{ d.title }}</h3>
+                            <p v-if="d.chinese_title && d.chinese_title !== d.title" class="text-[11px] text-slate-400 line-clamp-1">{{ d.chinese_title }}</p>
+                            <div class="text-[11px] text-slate-500 mt-1">大小: {{ d.size_mb }} MB<span v-if="d.updated_at"> · {{ d.updated_at }}</span></div>
+                        </div>
+                        <div class="pt-2 border-t border-slate-800 flex items-center justify-between gap-1 text-[11px]">
+                            <a v-if="d.first_episode_url" :href="d.first_episode_url" target="_blank" class="flex-1 text-center py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium">▶ 试看</a>
+                            <button @click="triggerCompress(d)" class="px-2 py-1 rounded bg-amber-950/40 text-amber-300 border border-amber-800/50 hover:bg-amber-900/60" title="压缩 (已是 H.265 的会自动跳过)">⚡</button>
+                            <a v-if="d.has_zip" :href="d.zip_url" download class="px-2 py-1 rounded bg-emerald-950/40 text-emerald-300 border border-emerald-800/50 hover:bg-emerald-900/60" title="下载 ZIP 归档包">📦</a>
+                            <button v-if="!d.has_zip || d.zip_stale" @click="triggerZip(d)" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400" :title="d.zip_stale ? 'ZIP 已过期(内容有更新)，重新打包' : '生成 ZIP 包'">{{ d.zip_stale ? '↻ZIP' : '+ZIP' }}</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 4: AI 智能助手 -->
+        <section v-if="activeTab === 'ai'" class="max-w-3xl mx-auto space-y-4">
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                <div class="flex items-center space-x-3 border-b border-slate-800 pb-4">
+                    <div class="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-xl">🤖</div>
+                    <div>
+                        <h2 class="text-sm font-bold text-white">短剧下载 AI 助理</h2>
+                        <p class="text-xs text-slate-400">支持自然语言，例如：“帮我把这部剧下载下来：https://www.slitz.com/shorts/room-service 并打包”</p>
+                    </div>
+                </div>
+                <div ref="chatBox" class="h-96 overflow-y-auto space-y-3 p-2">
+                    <div v-for="(chat, i) in chatHistory" :key="i" :class="chat.role === 'user' ? 'justify-end' : 'justify-start'" class="flex">
+                        <div :class="chat.role === 'user' ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-sm' : 'bg-slate-800 text-slate-200 rounded-2xl rounded-tl-sm border border-slate-700'"
+                             class="max-w-[85%] px-4 py-3 text-xs leading-relaxed whitespace-pre-wrap shadow">{{ chat.text }}</div>
+                    </div>
+                    <div v-if="chatLoading" class="flex justify-start">
+                        <div class="bg-slate-800 text-slate-400 rounded-2xl px-4 py-2 text-xs">🌀 正在解析意图...</div>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-2 pt-2 border-t border-slate-800">
+                    <input v-model="aiInput" @keyup.enter="sendAIChat" type="text" placeholder="向 AI 下达下载、查询指令..."
+                           class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500">
+                    <button @click="sendAIChat" :disabled="!aiInput.trim() || chatLoading" class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl text-xs font-semibold shadow">发送</button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- 日志弹窗：打开时才按需拉取完整日志 -->
+    <div v-if="logTask" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-6" @click.self="closeLog">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full max-h-[80vh] flex flex-col shadow-2xl">
+            <div class="p-4 border-b border-slate-800 flex items-center justify-between">
+                <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                    <span>任务日志</span><span class="text-xs font-mono text-slate-400">#{{ logTask.id }}</span>
+                    <span :class="statusCls(logTask.status)" class="text-[10px] px-2 py-0.5 rounded-full border">{{ statusText(logTask.status) }}</span>
+                </h3>
+                <button @click="closeLog" class="text-slate-400 hover:text-white text-lg">✕</button>
+            </div>
+            <div ref="logBox" class="p-4 flex-1 overflow-y-auto bg-slate-950 font-mono text-xs text-slate-300 space-y-1">
+                <div v-if="logLines.length === 0" class="text-slate-500">暂无日志</div>
+                <div v-for="(l, idx) in logLines" :key="idx" class="leading-relaxed break-all">{{ l }}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 轻提示 -->
+    <div v-if="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg text-xs shadow-lg border"
+         :class="toast.error ? 'bg-rose-950 text-rose-200 border-rose-800' : 'bg-slate-800 text-slate-100 border-slate-600'">{{ toast.text }}</div>
+</div>
+
+<script>
+const { createApp } = Vue;
+
+createApp({
+    data() {
+        return {
+            activeTab: 'create',
+            form: { url: '', auto_compress: true, auto_zip: false, max_eps: null },
+            submitting: false,
+            tasks: [],
+            dramas: [],
+            stats: { total_dramas: 0, total_episodes: 0, total_size_gb: 0 },
+            system: { encoder: null, encoder_desc: '', workers: 2, disk_free_gb: null },
+            filterPlatform: '',
+            search: '',
+            logTask: null,
+            logLines: [],
+            logTimer: null,
+            toast: null,
+            toastTimer: null,
+            lastFinished: -1,
+            aiInput: '',
+            chatLoading: false,
+            chatHistory: [
+                { role: 'ai', text: '你好！我是短剧协同平台的智能助理。\n你可以直接给我发送短剧链接，或者输入指令，比如：\n"帮我下载 https://www.slitz.com/shorts/room-service 并压缩打包"\n"自动下载 ReelShort 2 部最新短剧"\n"查询目前短剧库里有哪些剧"\n"现在任务进度怎么样"' }
+            ]
+        };
+    },
+    computed: {
+        hwAccel() { return !!this.system.encoder && !/^lib/.test(this.system.encoder); },
+        activeCount() { return this.tasks.filter(t => t.status === 'running' || t.status === 'pending').length; },
+        finishedCount() { return this.tasks.filter(t => this.isFinished(t)).length; },
+        platformList() { return [...new Set(this.dramas.map(d => d.platform))]; },
+        filteredDramas() {
+            const q = this.search.trim().toLowerCase();
+            return this.dramas.filter(d =>
+                (!this.filterPlatform || d.platform === this.filterPlatform) &&
+                (!q || (d.title + ' ' + d.chinese_title + ' ' + d.folder_name).toLowerCase().includes(q)));
+        }
+    },
+    mounted() {
+        this.loadTasks();
+        this.loadDramas();
+        this.loadSystem();
+        // 页面不可见时暂停轮询，避免后台标签页一直打后端
+        setInterval(() => { if (!document.hidden) this.loadTasks(); }, 2500);
+        setInterval(() => { if (!document.hidden) this.loadSystem(); }, 15000);
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') this.closeLog(); });
+    },
+    methods: {
+        async api(path, opts = {}) {
+            const res = await fetch(path, {
+                method: opts.method || 'GET',
+                headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
+                body: opts.body ? JSON.stringify(opts.body) : undefined
+            });
+            let data = null;
+            try { data = await res.json(); } catch (e) {}
+            if (!res.ok) {
+                let detail = data && data.detail;
+                if (Array.isArray(detail)) detail = detail.map(d => d.msg).join('; ');
+                throw new Error(detail || ('请求失败 (' + res.status + ')'));
+            }
+            return data;
+        },
+        notify(text, error = false) {
+            this.toast = { text, error };
+            clearTimeout(this.toastTimer);
+            this.toastTimer = setTimeout(() => { this.toast = null; }, 3500);
+        },
+        tabCls(name) { return this.activeTab === name ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'; },
+        isFinished(t) { return ['completed', 'failed', 'cancelled'].includes(t.status); },
+        statusText(s) { return { completed: '已完成', running: '运行中', failed: '失败', cancelled: '已取消', pending: '排队中' }[s] || s; },
+        typeText(t) { return { download: '下载', compress: '压缩', zip: '打包' }[t] || t; },
+        statusCls(s) {
+            return {
+                completed: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+                running: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+                failed: 'bg-rose-500/20 text-rose-400 border-rose-500/30',
+                cancelled: 'bg-slate-700 text-slate-400 border-slate-600',
+                pending: 'bg-slate-700 text-slate-300 border-slate-600'
+            }[s] || '';
+        },
+        shortTarget(t) {
+            if (t.type !== 'download') return t.target.split(/[\\/]/).slice(-2).join(' / ');
+            return t.target;
+        },
+        async submitDownload() {
+            const url = this.form.url.trim();
+            if (!url || this.submitting) return;
+            this.submitting = true;
+            try {
+                const data = await this.api('/api/tasks', { method: 'POST', body: { ...this.form, url, max_eps: this.form.max_eps || null } });
+                this.notify(data.duplicate ? '已有相同的进行中任务' : '任务已创建');
+                this.activeTab = 'tasks';
+                this.form.url = '';
+                this.loadTasks();
+            } catch (e) {
+                this.notify('提交失败: ' + e.message, true);
+            } finally {
+                this.submitting = false;
+            }
+        },
+        async loadTasks() {
+            try {
+                const data = await this.api('/api/tasks');
+                this.tasks = data.data;
+                // 有任务刚结束 → 资产库数据已变，顺手刷新一次
+                const finished = this.tasks.filter(t => t.status === 'completed').length;
+                if (this.lastFinished >= 0 && finished > this.lastFinished) this.loadDramas();
+                this.lastFinished = finished;
+                if (this.logTask) {
+                    const found = this.tasks.find(t => t.id === this.logTask.id);
+                    if (found) this.logTask = found;
+                }
+            } catch (e) {}
+        },
+        async loadDramas() {
+            try {
+                const data = await this.api('/api/dramas');
+                this.dramas = data.data;
+                this.stats = data.stats;
+            } catch (e) {}
+        },
+        async loadSystem() {
+            try { this.system = (await this.api('/api/system')).data; } catch (e) {}
+        },
+        async showLog(task) {
+            this.logTask = task;
+            this.logLines = [];
+            await this.refreshLog();
+            clearInterval(this.logTimer);
+            this.logTimer = setInterval(() => { if (!document.hidden) this.refreshLog(); }, 1500);
+        },
+        async refreshLog() {
+            if (!this.logTask) return;
+            try {
+                const box = this.$refs.logBox;
+                const atBottom = !box || box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+                const data = await this.api('/api/tasks/' + this.logTask.id + '?tail=400');
+                this.logLines = data.data.logs;
+                if (atBottom) this.$nextTick(() => { const b = this.$refs.logBox; if (b) b.scrollTop = b.scrollHeight; });
+            } catch (e) {}
+        },
+        closeLog() {
+            this.logTask = null;
+            clearInterval(this.logTimer);
+        },
+        async cancelTask(t) {
+            if (!confirm('确定取消该任务吗？已下载的内容会保留。')) return;
+            try { await this.api('/api/tasks/' + t.id + '/cancel', { method: 'POST' }); this.notify('已请求取消'); }
+            catch (e) { this.notify(e.message, true); }
+            this.loadTasks();
+        },
+        async retryTask(t) {
+            try {
+                const data = await this.api('/api/tasks/' + t.id + '/retry', { method: 'POST' });
+                this.notify(data.duplicate ? '已有相同的进行中任务' : '已重新提交 (断点续传)');
+            } catch (e) { this.notify(e.message, true); }
+            this.loadTasks();
+        },
+        async deleteTask(t) {
+            try { await this.api('/api/tasks/' + t.id, { method: 'DELETE' }); }
+            catch (e) { this.notify(e.message, true); }
+            this.loadTasks();
+        },
+        async clearFinished() {
+            try { await this.api('/api/tasks/clear', { method: 'POST' }); } catch (e) { this.notify(e.message, true); }
+            this.loadTasks();
+        },
+        async triggerCompress(d) {
+            if (!confirm('对「' + d.title + '」启动压缩？\n已是 H.265 的视频会自动跳过，压缩后更大的会保留原片。')) return;
+            try {
+                const data = await this.api('/api/compress', { method: 'POST', body: { path: d.relative_path } });
+                this.notify(data.msg);
+                this.activeTab = 'tasks';
+            } catch (e) { this.notify('提交失败: ' + e.message, true); }
+            this.loadTasks();
+        },
+        async triggerZip(d) {
+            try {
+                const data = await this.api('/api/zip', { method: 'POST', body: { path: d.relative_path } });
+                this.notify(data.msg);
+                this.activeTab = 'tasks';
+            } catch (e) { this.notify('提交失败: ' + e.message, true); }
+            this.loadTasks();
+        },
+        async sendAIChat() {
+            const text = this.aiInput.trim();
+            if (!text || this.chatLoading) return;
+            this.chatHistory.push({ role: 'user', text });
+            this.aiInput = '';
+            this.chatLoading = true;
+            try {
+                const data = await this.api('/api/ai/chat', { method: 'POST', body: { message: text } });
+                this.chatHistory.push({ role: 'ai', text: data.reply });
+                if (data.task_id) this.loadTasks();
+            } catch (e) {
+                this.chatHistory.push({ role: 'ai', text: '请求出错: ' + e.message });
+            } finally {
+                this.chatLoading = false;
+                this.$nextTick(() => { const b = this.$refs.chatBox; if (b) b.scrollTop = b.scrollHeight; });
+            }
+        }
+    }
+}).mount('#app');
+</script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+# 短剧下载平台依赖  (安装: pip install -r requirements.txt)
+fastapi>=0.110
+uvicorn>=0.27
+httpx>=0.27            # 仅测试用 (fastapi TestClient)
+pycryptodome>=3.18     # 注意不要装旧版 pycrypto
+imageio-ffmpeg>=0.4.9  # 自带 ffmpeg 可执行文件
