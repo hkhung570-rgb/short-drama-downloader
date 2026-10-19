@@ -420,7 +420,8 @@ def main():
     parser.add_argument("--max-eps", type=int, default=None, help="每部剧最大下载集数 (默认全集)")
     args = parser.parse_args()
 
-    base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "downloads", "Reelshort")
+    downloads = os.environ.get("DL_DOWNLOADS_DIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "downloads")
+    base_dir = os.path.join(downloads, "Reelshort")
     os.makedirs(base_dir, exist_ok=True)
 
     results = []

@@ -34,7 +34,8 @@ HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
 
-BASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'downloads', 'Slitz短剧')
+_DOWNLOADS = os.environ.get('DL_DOWNLOADS_DIR') or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'downloads')
+BASE_DIR = os.path.join(_DOWNLOADS, 'Slitz短剧')
 
 def extract_slug(input_str):
     m = re.search(r'shorts/([a-zA-Z0-9\-]+)', input_str)

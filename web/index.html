@@ -15,8 +15,8 @@
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen">
 <div id="app" v-cloak class="flex flex-col min-h-screen">
-    <!-- 顶部导航条 -->
-    <header class="bg-slate-900 border-b border-slate-800 sticky top-0 z-40 px-6 py-4 flex items-center justify-between flex-wrap gap-3">
+    <!-- 顶部 -->
+    <header class="bg-slate-900 border-b border-slate-800 sticky top-0 z-40 px-6 py-3 flex items-center justify-between flex-wrap gap-3">
         <div class="flex items-center space-x-3">
             <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center text-xl shadow-lg shadow-indigo-500/30">🎬</div>
             <div>
@@ -27,123 +27,120 @@
                         {{ system.encoder ? system.encoder_desc : '编码器检测中...' }}
                     </span>
                 </h1>
-                <p class="text-xs text-slate-400">ReelShort · Slitz · 黄果短剧 · 智能压缩 · 全员协作
-                    <span v-if="system.disk_free_gb !== null && system.disk_free_gb !== undefined"> · 磁盘剩余 {{ system.disk_free_gb }} GB</span>
+                <p class="text-xs text-slate-400">
+                    ReelShort · Slitz · 黄果短剧
+                    <span v-if="system.disk_free_gb != null" :class="diskLow ? 'text-rose-400 font-semibold' : ''"> · 磁盘剩余 {{ system.disk_free_gb }} GB<span v-if="diskLow"> (不足，建议压缩或清理回收站)</span></span>
                 </p>
             </div>
         </div>
 
-        <div class="flex items-center bg-slate-800/80 rounded-lg p-1 text-xs">
-            <button @click="activeTab = 'create'" :class="tabCls('create')" class="px-3 py-1.5 rounded-md transition">⚡ 极速下载</button>
-            <button @click="activeTab = 'tasks'" :class="tabCls('tasks')" class="px-3 py-1.5 rounded-md transition flex items-center gap-1.5">
-                📋 任务队列
-                <span v-if="activeCount > 0" class="min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-amber-400 text-slate-900 text-[10px] font-bold flex items-center justify-center">{{ activeCount }}</span>
-            </button>
-            <button @click="activeTab = 'dramas'; loadDramas()" :class="tabCls('dramas')" class="px-3 py-1.5 rounded-md transition">📚 资产库 ({{ stats.total_dramas }}部)</button>
-            <button @click="activeTab = 'ai'" :class="tabCls('ai')" class="px-3 py-1.5 rounded-md transition">🤖 AI 助手</button>
+        <div class="flex items-center gap-3 flex-wrap">
+            <label class="text-xs text-slate-400 flex items-center gap-1" title="记录在“操作记录”里，多人共用时方便追溯">
+                操作人
+                <input v-model="operator" @change="saveOperator" placeholder="你的名字" class="w-24 bg-slate-800 border border-slate-700 rounded-md px-2 py-1 text-xs text-white">
+            </label>
+            <div class="flex items-center bg-slate-800/80 rounded-lg p-1 text-xs">
+                <button @click="activeTab = 'create'" :class="tabCls('create')" class="px-3 py-1.5 rounded-md transition">⚡ 极速下载</button>
+                <button @click="activeTab = 'tasks'" :class="tabCls('tasks')" class="px-3 py-1.5 rounded-md transition flex items-center gap-1.5">
+                    📋 任务队列
+                    <span v-if="activeCount > 0" class="min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-amber-400 text-slate-900 text-[10px] font-bold flex items-center justify-center">{{ activeCount }}</span>
+                </button>
+                <button @click="activeTab = 'dramas'; loadDramas()" :class="tabCls('dramas')" class="px-3 py-1.5 rounded-md transition">📚 资产库 ({{ stats.total_dramas }})</button>
+                <button @click="openTrash" :class="tabCls('trash')" class="px-3 py-1.5 rounded-md transition">🗑 回收站<span v-if="trash.length"> ({{ trash.length }})</span></button>
+                <button @click="activeTab = 'ai'" :class="tabCls('ai')" class="px-3 py-1.5 rounded-md transition">🤖 AI 助手</button>
+            </div>
         </div>
     </header>
 
     <main class="flex-1 max-w-7xl w-full mx-auto px-6 py-6 space-y-6">
 
-        <!-- TAB 1: 极速创建下载 -->
+        <!-- TAB: 极速下载 -->
         <section v-if="activeTab === 'create'" class="space-y-6">
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center space-x-4">
-                    <div class="w-12 h-12 rounded-lg bg-indigo-500/10 flex items-center justify-center text-2xl">📼</div>
-                    <div><div class="text-xs text-slate-400">已归档剧集</div>
-                        <div class="text-xl font-bold text-white">{{ stats.total_dramas }} <span class="text-xs font-normal text-slate-400">部</span></div></div>
-                </div>
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center space-x-4">
-                    <div class="w-12 h-12 rounded-lg bg-purple-500/10 flex items-center justify-center text-2xl">🎞️</div>
-                    <div><div class="text-xs text-slate-400">总视频集数</div>
-                        <div class="text-xl font-bold text-white">{{ stats.total_episodes }} <span class="text-xs font-normal text-slate-400">集</span></div></div>
-                </div>
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center space-x-4">
-                    <div class="w-12 h-12 rounded-lg bg-emerald-500/10 flex items-center justify-center text-2xl">💾</div>
-                    <div><div class="text-xs text-slate-400">归档总空间</div>
-                        <div class="text-xl font-bold text-white">{{ stats.total_size_gb }} <span class="text-xs font-normal text-slate-400">GB</span></div></div>
-                </div>
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center space-x-4">
-                    <div class="w-12 h-12 rounded-lg bg-amber-500/10 flex items-center justify-center text-2xl">⚡</div>
-                    <div><div class="text-xs text-slate-400">压缩编码器</div>
-                        <div class="text-sm font-bold text-amber-300">{{ system.encoder || '检测中...' }}</div></div>
-                </div>
+            <div v-if="diskLow" class="bg-rose-950/40 border border-rose-900/60 text-rose-200 text-xs rounded-xl px-4 py-3">
+                ⚠️ 磁盘只剩 {{ system.disk_free_gb }} GB，继续下载可能失败。可在【资产库】压缩大的剧，或到【回收站】清理已不需要的内容。
             </div>
 
-            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4"><div class="text-xs text-slate-400">已归档剧集</div><div class="text-xl font-bold text-white">{{ stats.total_dramas }} <span class="text-xs font-normal text-slate-400">部</span></div></div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4"><div class="text-xs text-slate-400">总视频集数</div><div class="text-xl font-bold text-white">{{ stats.total_episodes }} <span class="text-xs font-normal text-slate-400">集</span></div></div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4"><div class="text-xs text-slate-400">归档总空间</div><div class="text-xl font-bold text-white">{{ stats.total_size_gb }} <span class="text-xs font-normal text-slate-400">GB</span></div></div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4"><div class="text-xs text-slate-400">进行中任务</div><div class="text-xl font-bold text-amber-300">{{ activeCount }}</div></div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
                 <div>
-                    <h2 class="text-base font-semibold text-white">新建短剧下载任务</h2>
-                    <p class="text-xs text-slate-400 mt-1">粘贴 ReelShort / Slitz / 黄果短剧的详情页链接，系统自动识别平台。同一链接已有进行中的任务时不会重复创建。</p>
+                    <h2 class="text-base font-semibold text-white">新建下载任务</h2>
+                    <p class="text-xs text-slate-400 mt-1">把剧集链接粘贴到下面，<b class="text-slate-200">一行一个</b>，可一次提交多部。重复的链接不会重复创建。</p>
                 </div>
 
-                <div class="space-y-4">
-                    <div>
-                        <label class="block text-xs font-medium text-slate-300 mb-1.5">剧目网址 (URL) 或 标识符</label>
-                        <div class="relative">
-                            <input v-model="form.url" @keyup.enter="submitDownload" type="text"
-                                   placeholder="例如: https://www.slitz.com/shorts/room-service 或 https://www.reelshort.com/movie/..."
-                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500 placeholder-slate-500 transition">
-                            <button v-if="form.url" @click="form.url = ''" class="absolute right-3 top-3 text-slate-400 hover:text-white">✕</button>
-                        </div>
-                    </div>
+                <textarea v-model="form.urls" rows="5" spellcheck="false"
+                          placeholder="https://www.slitz.com/shorts/room-service&#10;https://www.reelshort.com/movie/6ab8a43a2cdfd334da0580eb&#10;--latest 2   (自动下载 ReelShort 最新 2 部)"
+                          class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white font-mono focus:outline-none focus:border-indigo-500 placeholder-slate-600"></textarea>
 
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-950/60 p-4 rounded-xl border border-slate-800/80">
-                        <label class="flex items-center space-x-3 cursor-pointer">
-                            <input type="checkbox" v-model="form.auto_compress" class="w-4 h-4 rounded">
-                            <div><div class="text-sm font-medium text-slate-200">⚡ 智能压缩 (H.265)</div>
-                                <div class="text-xs text-slate-400">仅体积更小时才替换原片，约省 50%~70% 空间</div></div>
-                        </label>
-                        <label class="flex items-center space-x-3 cursor-pointer">
-                            <input type="checkbox" v-model="form.auto_zip" class="w-4 h-4 rounded">
-                            <div><div class="text-sm font-medium text-slate-200">📦 自动打包为 ZIP</div>
-                                <div class="text-xs text-slate-400">下载后自动归档压缩包便于发送</div></div>
-                        </label>
-                        <div class="flex items-center space-x-2">
-                            <span class="text-xs text-slate-300 whitespace-nowrap">限制集数:</span>
-                            <input v-model.number="form.max_eps" type="number" min="1" placeholder="全部"
-                                   class="w-24 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white">
-                            <span class="text-xs text-slate-500">(仅 ReelShort)</span>
-                        </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-950/60 p-4 rounded-xl border border-slate-800/80">
+                    <label class="flex items-start space-x-3 cursor-pointer">
+                        <input type="checkbox" v-model="form.auto_compress" class="w-4 h-4 rounded mt-0.5">
+                        <div><div class="text-sm font-medium text-slate-200">⚡ 下载后自动压缩 (H.265)</div>
+                            <div class="text-xs text-slate-400">约省 50%~70% 空间；只有压缩后更小才会替换原片</div></div>
+                    </label>
+                    <label class="flex items-start space-x-3 cursor-pointer" :class="form.auto_compress ? '' : 'opacity-40'">
+                        <input type="checkbox" v-model="form.keep_original" :disabled="!form.auto_compress" class="w-4 h-4 rounded mt-0.5">
+                        <div><div class="text-sm font-medium text-slate-200">↩ 压缩时保留原片 (可撤销)</div>
+                            <div class="text-xs text-slate-400">原片放进回收站 {{ system.trash_days || 7 }} 天，可一键撤销；会多占磁盘空间</div></div>
+                    </label>
+                    <label class="flex items-start space-x-3 cursor-pointer">
+                        <input type="checkbox" v-model="form.auto_zip" class="w-4 h-4 rounded mt-0.5">
+                        <div><div class="text-sm font-medium text-slate-200">📦 自动打包为 ZIP</div>
+                            <div class="text-xs text-slate-400">下载完成后生成压缩包，方便直接发送</div></div>
+                    </label>
+                    <div class="flex items-center space-x-2">
+                        <span class="text-xs text-slate-300 whitespace-nowrap">只下前</span>
+                        <input v-model.number="form.max_eps" type="number" min="1" placeholder="全部" class="w-20 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white">
+                        <span class="text-xs text-slate-500">集 (试看用，仅 ReelShort 有效)</span>
                     </div>
+                </div>
 
-                    <div class="flex flex-wrap items-center gap-2 pt-1 text-xs text-slate-400">
-                        <span>常用快速填入：</span>
-                        <button @click="form.url = 'https://www.slitz.com/shorts/room-service'" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded text-slate-300">Slitz: Room Service</button>
-                        <button @click="form.url = 'https://www.slitz.com/shorts/behind-on-rent'" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded text-slate-300">Slitz: Behind on Rent</button>
-                        <button @click="form.url = '--latest 2'" class="px-2 py-1 bg-indigo-900/40 text-indigo-300 border border-indigo-700/50 rounded">🔥 自动抓取 ReelShort 最新 2 部</button>
+                <button @click="submitDownload" :disabled="submitting || !urlLines.length"
+                        class="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-50 text-white font-medium py-3 rounded-xl shadow-lg shadow-indigo-600/30 transition">
+                    {{ submitting ? '🚀 正在提交...' : (urlLines.length > 1 ? `🚀 提交 ${urlLines.length} 个下载` : '🚀 开始下载') }}
+                </button>
+
+                <!-- 批量提交结果 -->
+                <div v-if="batchResult" class="text-xs border border-slate-800 rounded-xl overflow-hidden">
+                    <div class="px-4 py-2 bg-slate-950 text-slate-300 flex items-center justify-between">
+                        <span>提交结果：新建 {{ batchResult.summary.created }}，重复 {{ batchResult.summary.duplicate }}，无法识别 {{ batchResult.summary.failed }}</span>
+                        <button @click="batchResult = null" class="text-slate-500 hover:text-white">✕</button>
                     </div>
-
-                    <button @click="submitDownload" :disabled="submitting || !form.url.trim()"
-                            class="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-50 text-white font-medium py-3 rounded-xl shadow-lg shadow-indigo-600/30 transition">
-                        {{ submitting ? '🚀 正在派发任务...' : '🚀 开始全自动化下载与处理' }}
-                    </button>
+                    <div v-for="(r, i) in batchResult.results" :key="i" class="px-4 py-1.5 border-t border-slate-800 flex gap-2">
+                        <span :class="r.ok ? (r.duplicate ? 'text-amber-400' : 'text-emerald-400') : 'text-rose-400'">{{ r.ok ? (r.duplicate ? '重复' : '已创建') : '失败' }}</span>
+                        <span class="truncate flex-1 text-slate-400 font-mono" :title="r.input">{{ r.input }}</span>
+                        <span v-if="!r.ok" class="text-rose-300">{{ r.error }}</span>
+                        <span v-else class="text-slate-500">{{ r.platform }}</span>
+                    </div>
                 </div>
             </div>
         </section>
 
-        <!-- TAB 2: 任务队列 -->
+        <!-- TAB: 任务队列 -->
         <section v-if="activeTab === 'tasks'" class="space-y-4">
             <div class="flex items-center justify-between">
                 <div>
-                    <h2 class="text-base font-semibold text-white">下载与处理任务队列</h2>
-                    <p class="text-xs text-slate-400">最多同时执行 {{ system.workers || 2 }} 个任务，其余排队；压缩阶段始终串行以免抢占 GPU</p>
+                    <h2 class="text-base font-semibold text-white">任务队列</h2>
+                    <p class="text-xs text-slate-400">同时最多执行 {{ system.workers || 2 }} 个任务，其余排队。失败的任务点【重试】会断点续传，不会重复下载已有的集数。</p>
                 </div>
                 <div class="flex gap-2">
-                    <button @click="clearFinished" :disabled="!finishedCount" class="text-xs bg-slate-800 hover:bg-slate-700 disabled:opacity-40 px-3 py-1.5 rounded-lg text-slate-300 transition">🧹 清除已结束 ({{ finishedCount }})</button>
-                    <button @click="loadTasks" class="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-slate-300 transition">🔄 刷新</button>
+                    <button @click="clearFinished" :disabled="!finishedCount" class="text-xs bg-slate-800 hover:bg-slate-700 disabled:opacity-40 px-3 py-1.5 rounded-lg text-slate-300">🧹 清除已结束 ({{ finishedCount }})</button>
+                    <button @click="loadTasks" class="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-slate-300">🔄 刷新</button>
                 </div>
             </div>
 
-            <div v-if="tasks.length === 0" class="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center text-slate-500">
-                📭 暂无任务记录，点击【极速下载】创建第一个任务吧！
-            </div>
+            <div v-if="tasks.length === 0" class="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center text-slate-500">📭 暂无任务，去【极速下载】创建第一个吧</div>
 
             <div v-for="t in tasks" :key="t.id" class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3 shadow">
                 <div class="flex items-center justify-between gap-3 flex-wrap">
                     <div class="flex items-center gap-2 min-w-0 flex-wrap">
                         <span :class="statusCls(t.status)" class="text-xs px-2.5 py-1 rounded-full border font-medium">{{ statusText(t.status) }}</span>
-                        <span class="text-xs font-mono text-slate-400">#{{ t.id }}</span>
+                        <span class="text-xs font-mono text-slate-500">#{{ t.id }}</span>
                         <span class="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">{{ typeText(t.type) }}</span>
                         <span class="text-xs px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800">{{ t.platform }}</span>
                         <h3 class="text-sm font-semibold text-white truncate max-w-md" :title="t.target">{{ shortTarget(t) }}</h3>
@@ -164,32 +161,43 @@
 
                 <div v-if="t.error" class="text-xs text-rose-300 bg-rose-950/40 border border-rose-900/60 rounded-lg px-3 py-2">❌ {{ t.error }}</div>
                 <div v-if="t.warning" class="text-xs text-amber-300 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">⚠️ {{ t.warning }}</div>
+                <div v-if="t.undo_available" class="text-xs text-sky-300 bg-sky-950/30 border border-sky-900/50 rounded-lg px-3 py-2 flex items-center justify-between gap-2">
+                    <span>↩ 压缩前的原片还保留着，不满意可以撤销</span>
+                    <button @click="undoTask(t)" class="px-2 py-1 rounded bg-sky-900/60 border border-sky-700 hover:bg-sky-800 text-sky-100">撤销压缩</button>
+                </div>
 
                 <div class="flex items-center justify-between gap-3 pt-2 text-xs text-slate-400 border-t border-slate-800/80">
                     <div class="truncate text-slate-500 flex-1">最近日志: {{ t.last_log || '无' }}</div>
                     <div class="flex items-center gap-2 shrink-0">
                         <button @click="showLog(t)" class="text-indigo-400 hover:text-indigo-300 font-medium">日志 ({{ t.log_count }})</button>
+                        <button v-if="system.local && t.status === 'completed' && relPath(t.result_dirs[0])" @click="openFolder(relPath(t.result_dirs[0]))" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300">📂 打开</button>
                         <button v-if="t.status === 'pending' || t.status === 'running'" @click="cancelTask(t)" class="px-2 py-1 rounded bg-rose-950/40 text-rose-300 border border-rose-900/60 hover:bg-rose-900/50">取消</button>
                         <button v-if="t.status === 'failed' || t.status === 'cancelled'" @click="retryTask(t)" class="px-2 py-1 rounded bg-amber-950/40 text-amber-300 border border-amber-800/50 hover:bg-amber-900/60">重试</button>
-                        <button v-if="isFinished(t)" @click="deleteTask(t)" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400">删除</button>
+                        <button v-if="isFinished(t)" @click="deleteTask(t)" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400">删除记录</button>
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- TAB 3: 资产管理库 -->
+        <!-- TAB: 资产库 -->
         <section v-if="activeTab === 'dramas'" class="space-y-4">
             <div class="flex items-center justify-between flex-wrap gap-2">
                 <div>
                     <h2 class="text-base font-semibold text-white">本地剧集资产库</h2>
-                    <p class="text-xs text-slate-400">按规范自动归档的短剧总览，支持在线试看与一键打包</p>
+                    <p class="text-xs text-slate-400">删除和压缩都可以撤销：删除的剧进【回收站】，压缩前的原片也会保留。</p>
                 </div>
-                <div class="flex items-center space-x-2">
-                    <input v-model="search" type="text" placeholder="搜索剧名..." class="bg-slate-800 border border-slate-700 text-xs rounded-lg px-3 py-1.5 text-slate-200 w-40">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <input v-model="search" type="text" placeholder="搜索剧名..." class="bg-slate-800 border border-slate-700 text-xs rounded-lg px-3 py-1.5 text-slate-200 w-36">
                     <select v-model="filterPlatform" class="bg-slate-800 border border-slate-700 text-xs rounded-lg px-3 py-1.5 text-slate-300">
                         <option value="">全部平台</option>
                         <option v-for="p in platformList" :key="p" :value="p">{{ p }}</option>
                     </select>
+                    <select v-model="sortBy" class="bg-slate-800 border border-slate-700 text-xs rounded-lg px-3 py-1.5 text-slate-300">
+                        <option value="updated">最近更新</option>
+                        <option value="name">名称</option>
+                        <option value="size">体积 (大→小)</option>
+                    </select>
+                    <a href="/api/dramas/export.csv" class="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-slate-300" title="导出清单，Excel 可直接打开">📥 导出清单</a>
                     <button @click="loadDramas" class="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-slate-300">🔄 刷新</button>
                 </div>
             </div>
@@ -208,27 +216,71 @@
                         <div>
                             <h3 class="text-xs font-bold text-white line-clamp-1" :title="d.title">{{ d.title }}</h3>
                             <p v-if="d.chinese_title && d.chinese_title !== d.title" class="text-[11px] text-slate-400 line-clamp-1">{{ d.chinese_title }}</p>
-                            <div class="text-[11px] text-slate-500 mt-1">大小: {{ d.size_mb }} MB<span v-if="d.updated_at"> · {{ d.updated_at }}</span></div>
+                            <div class="text-[11px] text-slate-500 mt-1">{{ d.size_mb }} MB<span v-if="d.updated_at"> · {{ d.updated_at }}</span></div>
                         </div>
-                        <div class="pt-2 border-t border-slate-800 flex items-center justify-between gap-1 text-[11px]">
-                            <a v-if="d.first_episode_url" :href="d.first_episode_url" target="_blank" class="flex-1 text-center py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium">▶ 试看</a>
-                            <button @click="triggerCompress(d)" class="px-2 py-1 rounded bg-amber-950/40 text-amber-300 border border-amber-800/50 hover:bg-amber-900/60" title="压缩 (已是 H.265 的会自动跳过)">⚡</button>
-                            <a v-if="d.has_zip" :href="d.zip_url" download class="px-2 py-1 rounded bg-emerald-950/40 text-emerald-300 border border-emerald-800/50 hover:bg-emerald-900/60" title="下载 ZIP 归档包">📦</a>
-                            <button v-if="!d.has_zip || d.zip_stale" @click="triggerZip(d)" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400" :title="d.zip_stale ? 'ZIP 已过期(内容有更新)，重新打包' : '生成 ZIP 包'">{{ d.zip_stale ? '↻ZIP' : '+ZIP' }}</button>
+                        <div class="pt-2 border-t border-slate-800 space-y-1.5 text-[11px]">
+                            <a v-if="d.first_episode_url" :href="d.first_episode_url" target="_blank" class="block text-center py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium whitespace-nowrap">▶ 试看</a>
+                            <div class="flex items-center justify-between gap-1">
+                                <button @click="triggerCompress(d)" class="flex-1 py-1 rounded bg-amber-950/40 text-amber-300 border border-amber-800/50 hover:bg-amber-900/60" title="压缩 (原片保留，可撤销；已是 H.265 的自动跳过)">⚡</button>
+                                <a v-if="d.has_zip" :href="d.zip_url" download class="flex-1 text-center py-1 rounded bg-emerald-950/40 text-emerald-300 border border-emerald-800/50 hover:bg-emerald-900/60" title="下载 ZIP 归档包">📦</a>
+                                <button v-if="!d.has_zip || d.zip_stale" @click="triggerZip(d)" class="flex-1 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 whitespace-nowrap" :title="d.zip_stale ? 'ZIP 已过期(内容有更新)，重新打包' : '生成 ZIP 包'">{{ d.zip_stale ? '↻ZIP' : '+ZIP' }}</button>
+                                <button v-if="system.local" @click="openFolder(d.relative_path)" class="flex-1 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300" title="在资源管理器中打开">📂</button>
+                                <button @click="deleteDrama(d)" class="flex-1 py-1 rounded bg-rose-950/40 text-rose-300 border border-rose-900/60 hover:bg-rose-900/50" title="删除 (进回收站，可恢复)">🗑</button>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- TAB 4: AI 智能助手 -->
+        <!-- TAB: 回收站 -->
+        <section v-if="activeTab === 'trash'" class="space-y-6">
+            <div class="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                    <h2 class="text-base font-semibold text-white">回收站</h2>
+                    <p class="text-xs text-slate-400">被删除的剧、压缩前的原片都暂存在这里，{{ trashDays }} 天内可随时恢复，超期自动清理。共占用 {{ trashMb }} MB。</p>
+                </div>
+                <button @click="purgeAll" :disabled="!trash.length" class="text-xs bg-rose-950/50 text-rose-300 border border-rose-900/60 hover:bg-rose-900/50 disabled:opacity-40 px-3 py-1.5 rounded-lg">清空回收站 (不可恢复)</button>
+            </div>
+
+            <div v-if="!trash.length" class="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center text-slate-500">🗑 回收站是空的</div>
+
+            <div v-else class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+                <div v-for="e in trash" :key="e.id" class="px-4 py-3 border-b border-slate-800 last:border-0 flex items-center gap-3 flex-wrap text-xs">
+                    <span :class="e.kind === 'delete' ? 'bg-rose-500/15 text-rose-300 border-rose-500/30' : 'bg-sky-500/15 text-sky-300 border-sky-500/30'"
+                          class="px-2 py-0.5 rounded-full border">{{ e.kind === 'delete' ? '已删除的剧' : '压缩前原片' }}</span>
+                    <span class="text-slate-200 font-medium">{{ e.platform }} / {{ e.drama }}</span>
+                    <span class="text-slate-500">{{ e.file_count }} 个文件 · {{ e.size_mb }} MB</span>
+                    <span class="text-slate-500">{{ e.created_at }}</span>
+                    <span class="text-slate-500">剩余 {{ e.days_left }} 天</span>
+                    <span class="flex-1"></span>
+                    <button @click="restoreEntry(e)" class="px-3 py-1 rounded bg-emerald-900/50 text-emerald-200 border border-emerald-700 hover:bg-emerald-800/60">{{ e.kind === 'delete' ? '↩ 恢复' : '↩ 撤销压缩' }}</button>
+                    <button @click="purgeOne(e)" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400">永久删除</button>
+                </div>
+            </div>
+
+            <div>
+                <h3 class="text-sm font-semibold text-white mb-2">操作记录 <span class="text-xs font-normal text-slate-500">(谁在什么时候做了什么)</span></h3>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden max-h-80 overflow-y-auto">
+                    <div v-if="!audit.length" class="px-4 py-6 text-center text-xs text-slate-500">暂无记录</div>
+                    <div v-for="(a, i) in audit" :key="i" class="px-4 py-1.5 border-b border-slate-800 last:border-0 text-xs flex gap-3">
+                        <span class="text-slate-500 shrink-0">{{ a.time }}</span>
+                        <span class="text-slate-400 shrink-0 w-24 truncate" :title="a.ip">{{ a.operator || a.ip }}</span>
+                        <span class="text-slate-200 shrink-0">{{ a.action }}</span>
+                        <span class="text-slate-500 truncate" :title="a.detail">{{ a.detail }}</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB: AI 助手 -->
         <section v-if="activeTab === 'ai'" class="max-w-3xl mx-auto space-y-4">
             <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
                 <div class="flex items-center space-x-3 border-b border-slate-800 pb-4">
                     <div class="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-xl">🤖</div>
                     <div>
-                        <h2 class="text-sm font-bold text-white">短剧下载 AI 助理</h2>
-                        <p class="text-xs text-slate-400">支持自然语言，例如：“帮我把这部剧下载下来：https://www.slitz.com/shorts/room-service 并打包”</p>
+                        <h2 class="text-sm font-bold text-white">短剧下载助理</h2>
+                        <p class="text-xs text-slate-400">直接说人话：下载链接、查进度、查资产库、“撤销刚才的操作”。(外部 AI Agent 的接入方式见 AGENTS.md)</p>
                     </div>
                 </div>
                 <div ref="chatBox" class="h-96 overflow-y-auto space-y-3 p-2">
@@ -236,20 +288,20 @@
                         <div :class="chat.role === 'user' ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-sm' : 'bg-slate-800 text-slate-200 rounded-2xl rounded-tl-sm border border-slate-700'"
                              class="max-w-[85%] px-4 py-3 text-xs leading-relaxed whitespace-pre-wrap shadow">{{ chat.text }}</div>
                     </div>
-                    <div v-if="chatLoading" class="flex justify-start">
-                        <div class="bg-slate-800 text-slate-400 rounded-2xl px-4 py-2 text-xs">🌀 正在解析意图...</div>
-                    </div>
+                    <div v-if="chatLoading" class="flex justify-start"><div class="bg-slate-800 text-slate-400 rounded-2xl px-4 py-2 text-xs">🌀 正在处理...</div></div>
+                </div>
+                <div class="flex flex-wrap gap-2 text-xs">
+                    <button v-for="q in quickAsk" :key="q" @click="aiInput = q; sendAIChat()" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300">{{ q }}</button>
                 </div>
                 <div class="flex items-center space-x-2 pt-2 border-t border-slate-800">
-                    <input v-model="aiInput" @keyup.enter="sendAIChat" type="text" placeholder="向 AI 下达下载、查询指令..."
-                           class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500">
+                    <input v-model="aiInput" @keyup.enter="sendAIChat" type="text" placeholder="输入指令..." class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500">
                     <button @click="sendAIChat" :disabled="!aiInput.trim() || chatLoading" class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl text-xs font-semibold shadow">发送</button>
                 </div>
             </div>
         </section>
     </main>
 
-    <!-- 日志弹窗：打开时才按需拉取完整日志 -->
+    <!-- 日志弹窗 -->
     <div v-if="logTask" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-6" @click.self="closeLog">
         <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full max-h-[80vh] flex flex-col shadow-2xl">
             <div class="p-4 border-b border-slate-800 flex items-center justify-between">
@@ -266,9 +318,23 @@
         </div>
     </div>
 
-    <!-- 轻提示 -->
-    <div v-if="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg text-xs shadow-lg border"
-         :class="toast.error ? 'bg-rose-950 text-rose-200 border-rose-800' : 'bg-slate-800 text-slate-100 border-slate-600'">{{ toast.text }}</div>
+    <!-- 访问口令 -->
+    <div v-if="needLogin" class="fixed inset-0 bg-black/85 backdrop-blur-sm z-[60] flex items-center justify-center p-6">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+            <h3 class="text-base font-bold text-white">🔒 请输入访问口令</h3>
+            <p class="text-xs text-slate-400">这个平台设置了口令，向管理员获取。</p>
+            <input v-model="loginToken" @keyup.enter="doLogin" type="password" autofocus placeholder="访问口令" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500">
+            <div v-if="loginError" class="text-xs text-rose-400">{{ loginError }}</div>
+            <button @click="doLogin" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2.5 rounded-xl text-sm font-medium">进入</button>
+        </div>
+    </div>
+
+    <!-- 轻提示 (可带操作按钮，如“撤销”) -->
+    <div v-if="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-lg text-xs shadow-lg border flex items-center gap-3"
+         :class="toast.error ? 'bg-rose-950 text-rose-200 border-rose-800' : 'bg-slate-800 text-slate-100 border-slate-600'">
+        <span>{{ toast.text }}</span>
+        <button v-if="toast.action" @click="toast.action.run(); toast = null" class="px-2 py-0.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-medium">{{ toast.action.label }}</button>
+    </div>
 </div>
 
 <script>
@@ -278,57 +344,66 @@ createApp({
     data() {
         return {
             activeTab: 'create',
-            form: { url: '', auto_compress: true, auto_zip: false, max_eps: null },
+            form: { urls: '', auto_compress: true, keep_original: false, auto_zip: false, max_eps: null },
             submitting: false,
+            batchResult: null,
             tasks: [],
             dramas: [],
             stats: { total_dramas: 0, total_episodes: 0, total_size_gb: 0 },
-            system: { encoder: null, encoder_desc: '', workers: 2, disk_free_gb: null },
-            filterPlatform: '',
-            search: '',
-            logTask: null,
-            logLines: [],
-            logTimer: null,
-            toast: null,
-            toastTimer: null,
+            system: { encoder: null, encoder_desc: '', workers: 2, disk_free_gb: null, local: false, trash_days: 7, downloads_dir: '' },
+            trash: [], trashDays: 7, trashMb: 0, audit: [], auditTimer: null,
+            filterPlatform: '', search: '', sortBy: 'updated',
+            operator: '',
+            logTask: null, logLines: [], logTimer: null,
+            toast: null, toastTimer: null,
+            needLogin: false, loginToken: '', loginError: '',
             lastFinished: -1,
-            aiInput: '',
-            chatLoading: false,
+            aiInput: '', chatLoading: false,
+            quickAsk: ['现在任务进度怎么样', '查询已下载的剧', '看看回收站', '撤销刚才的操作'],
             chatHistory: [
-                { role: 'ai', text: '你好！我是短剧协同平台的智能助理。\n你可以直接给我发送短剧链接，或者输入指令，比如：\n"帮我下载 https://www.slitz.com/shorts/room-service 并压缩打包"\n"自动下载 ReelShort 2 部最新短剧"\n"查询目前短剧库里有哪些剧"\n"现在任务进度怎么样"' }
+                { role: 'ai', text: '你好！我是短剧协同平台的助理。\n你可以：\n· 发送链接让我下载（可带“并打包”“不压缩”“前3集”）\n· 问“任务进度怎么样”“已下载了多少”\n· 说“撤销刚才的操作”恢复最近一次删除/压缩' }
             ]
         };
     },
     computed: {
         hwAccel() { return !!this.system.encoder && !/^lib/.test(this.system.encoder); },
+        diskLow() { return this.system.disk_free_gb != null && this.system.disk_free_gb < 10; },
+        urlLines() { return this.form.urls.split(/\r?\n/).map(s => s.trim()).filter(Boolean); },
         activeCount() { return this.tasks.filter(t => t.status === 'running' || t.status === 'pending').length; },
         finishedCount() { return this.tasks.filter(t => this.isFinished(t)).length; },
         platformList() { return [...new Set(this.dramas.map(d => d.platform))]; },
         filteredDramas() {
             const q = this.search.trim().toLowerCase();
-            return this.dramas.filter(d =>
+            const list = this.dramas.filter(d =>
                 (!this.filterPlatform || d.platform === this.filterPlatform) &&
                 (!q || (d.title + ' ' + d.chinese_title + ' ' + d.folder_name).toLowerCase().includes(q)));
+            const by = this.sortBy;
+            return list.slice().sort((a, b) =>
+                by === 'size' ? b.size_mb - a.size_mb :
+                by === 'name' ? a.title.localeCompare(b.title, 'zh') :
+                (b.updated_at || '').localeCompare(a.updated_at || ''));
         }
     },
     mounted() {
-        this.loadTasks();
-        this.loadDramas();
-        this.loadSystem();
-        // 页面不可见时暂停轮询，避免后台标签页一直打后端
-        setInterval(() => { if (!document.hidden) this.loadTasks(); }, 2500);
-        setInterval(() => { if (!document.hidden) this.loadSystem(); }, 15000);
+        try { this.operator = localStorage.getItem('dl_operator') || ''; } catch (e) {}
+        this.refreshAll();
+        // 页面不可见时暂停轮询
+        setInterval(() => { if (!document.hidden && !this.needLogin) this.loadTasks(); }, 2500);
+        setInterval(() => { if (!document.hidden && !this.needLogin) this.loadSystem(); }, 15000);
         document.addEventListener('keydown', e => { if (e.key === 'Escape') this.closeLog(); });
     },
     methods: {
         async api(path, opts = {}) {
+            const headers = {};
+            if (opts.body) headers['Content-Type'] = 'application/json';
+            if (this.operator.trim()) headers['X-Operator'] = encodeURIComponent(this.operator.trim());
             const res = await fetch(path, {
-                method: opts.method || 'GET',
-                headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
+                method: opts.method || 'GET', headers,
                 body: opts.body ? JSON.stringify(opts.body) : undefined
             });
             let data = null;
             try { data = await res.json(); } catch (e) {}
+            if (res.status === 401) { this.needLogin = true; throw new Error('需要访问口令'); }
             if (!res.ok) {
                 let detail = data && data.detail;
                 if (Array.isArray(detail)) detail = detail.map(d => d.msg).join('; ');
@@ -336,10 +411,20 @@ createApp({
             }
             return data;
         },
-        notify(text, error = false) {
-            this.toast = { text, error };
+        notify(text, error = false, action = null, ms = 4000) {
+            this.toast = { text, error, action };
             clearTimeout(this.toastTimer);
-            this.toastTimer = setTimeout(() => { this.toast = null; }, 3500);
+            this.toastTimer = setTimeout(() => { this.toast = null; }, action ? Math.max(ms, 9000) : ms);
+        },
+        saveOperator() { try { localStorage.setItem('dl_operator', this.operator.trim()); } catch (e) {} },
+        refreshAll() { this.loadTasks(); this.loadDramas(); this.loadSystem(); this.loadTrash(); },
+        async doLogin() {
+            this.loginError = '';
+            try {
+                await this.api('/api/login', { method: 'POST', body: { token: this.loginToken } });
+                this.needLogin = false; this.loginToken = '';
+                this.refreshAll();
+            } catch (e) { this.loginError = e.message === '需要访问口令' ? '口令错误' : e.message; }
         },
         tabCls(name) { return this.activeTab === name ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'; },
         isFinished(t) { return ['completed', 'failed', 'cancelled'].includes(t.status); },
@@ -354,53 +439,53 @@ createApp({
                 pending: 'bg-slate-700 text-slate-300 border-slate-600'
             }[s] || '';
         },
-        shortTarget(t) {
-            if (t.type !== 'download') return t.target.split(/[\\/]/).slice(-2).join(' / ');
-            return t.target;
+        shortTarget(t) { return t.type !== 'download' ? t.target.split(/[\\/]/).slice(-2).join(' / ') : t.target; },
+        relPath(abs) {
+            // 绝对路径 → '平台/剧目录'
+            if (!abs || !this.system.downloads_dir) return '';
+            const norm = s => s.replace(/\\/g, '/').replace(/\/+$/, '');
+            const base = norm(this.system.downloads_dir) + '/', p = norm(abs);
+            return p.toLowerCase().startsWith(base.toLowerCase()) ? p.slice(base.length) : '';
         },
+
+        // ---- 下载 ----
         async submitDownload() {
-            const url = this.form.url.trim();
-            if (!url || this.submitting) return;
+            if (!this.urlLines.length || this.submitting) return;
             this.submitting = true;
             try {
-                const data = await this.api('/api/tasks', { method: 'POST', body: { ...this.form, url, max_eps: this.form.max_eps || null } });
-                this.notify(data.duplicate ? '已有相同的进行中任务' : '任务已创建');
-                this.activeTab = 'tasks';
-                this.form.url = '';
+                const data = await this.api('/api/tasks/batch', { method: 'POST', body: {
+                    urls: this.urlLines, auto_compress: this.form.auto_compress,
+                    keep_original: this.form.auto_compress && this.form.keep_original,
+                    auto_zip: this.form.auto_zip, max_eps: this.form.max_eps || null } });
+                const s = data.summary;
+                if (s.failed === 0) {
+                    this.notify(`已创建 ${s.created} 个任务` + (s.duplicate ? `，${s.duplicate} 个已在进行中` : ''));
+                    this.form.urls = ''; this.batchResult = null; this.activeTab = 'tasks';
+                } else {
+                    // 有无法识别的链接：留在本页展示原因，已成功的不会重复提交 (重复提交会被去重)
+                    this.batchResult = data;
+                    this.notify(`${s.created} 个已创建，${s.failed} 个无法识别，见下方结果`, true);
+                }
                 this.loadTasks();
             } catch (e) {
                 this.notify('提交失败: ' + e.message, true);
-            } finally {
-                this.submitting = false;
-            }
+            } finally { this.submitting = false; }
         },
+
+        // ---- 任务 ----
         async loadTasks() {
             try {
                 const data = await this.api('/api/tasks');
                 this.tasks = data.data;
-                // 有任务刚结束 → 资产库数据已变，顺手刷新一次
                 const finished = this.tasks.filter(t => t.status === 'completed').length;
-                if (this.lastFinished >= 0 && finished > this.lastFinished) this.loadDramas();
+                if (this.lastFinished >= 0 && finished > this.lastFinished) { this.loadDramas(); this.loadTrash(); }
                 this.lastFinished = finished;
-                if (this.logTask) {
-                    const found = this.tasks.find(t => t.id === this.logTask.id);
-                    if (found) this.logTask = found;
-                }
+                if (this.logTask) { const f = this.tasks.find(t => t.id === this.logTask.id); if (f) this.logTask = f; }
             } catch (e) {}
         },
-        async loadDramas() {
-            try {
-                const data = await this.api('/api/dramas');
-                this.dramas = data.data;
-                this.stats = data.stats;
-            } catch (e) {}
-        },
-        async loadSystem() {
-            try { this.system = (await this.api('/api/system')).data; } catch (e) {}
-        },
+        async loadSystem() { try { this.system = (await this.api('/api/system')).data; } catch (e) {} },
         async showLog(task) {
-            this.logTask = task;
-            this.logLines = [];
+            this.logTask = task; this.logLines = [];
             await this.refreshLog();
             clearInterval(this.logTimer);
             this.logTimer = setInterval(() => { if (!document.hidden) this.refreshLog(); }, 1500);
@@ -415,10 +500,7 @@ createApp({
                 if (atBottom) this.$nextTick(() => { const b = this.$refs.logBox; if (b) b.scrollTop = b.scrollHeight; });
             } catch (e) {}
         },
-        closeLog() {
-            this.logTask = null;
-            clearInterval(this.logTimer);
-        },
+        closeLog() { this.logTask = null; clearInterval(this.logTimer); },
         async cancelTask(t) {
             if (!confirm('确定取消该任务吗？已下载的内容会保留。')) return;
             try { await this.api('/api/tasks/' + t.id + '/cancel', { method: 'POST' }); this.notify('已请求取消'); }
@@ -427,50 +509,97 @@ createApp({
         },
         async retryTask(t) {
             try {
-                const data = await this.api('/api/tasks/' + t.id + '/retry', { method: 'POST' });
-                this.notify(data.duplicate ? '已有相同的进行中任务' : '已重新提交 (断点续传)');
+                const d = await this.api('/api/tasks/' + t.id + '/retry', { method: 'POST' });
+                this.notify(d.duplicate ? '已有相同的进行中任务' : '已重新提交 (断点续传)');
             } catch (e) { this.notify(e.message, true); }
             this.loadTasks();
         },
         async deleteTask(t) {
-            try { await this.api('/api/tasks/' + t.id, { method: 'DELETE' }); }
-            catch (e) { this.notify(e.message, true); }
+            try { await this.api('/api/tasks/' + t.id, { method: 'DELETE' }); } catch (e) { this.notify(e.message, true); }
             this.loadTasks();
         },
         async clearFinished() {
             try { await this.api('/api/tasks/clear', { method: 'POST' }); } catch (e) { this.notify(e.message, true); }
             this.loadTasks();
         },
+        async undoTask(t) {
+            if (!confirm('撤销压缩：换回压缩前的原片 (压缩后的版本会被替换)。确定吗？')) return;
+            let ok = 0;
+            for (const id of t.trash_ids) {
+                try { await this.api('/api/trash/' + id + '/restore', { method: 'POST' }); ok++; } catch (e) { if (!/没有这个条目/.test(e.message)) this.notify(e.message, true); }
+            }
+            if (ok) this.notify('已撤销压缩，换回原片');
+            this.loadTasks(); this.loadTrash(); this.loadDramas();
+        },
+
+        // ---- 资产库 ----
+        async loadDramas() {
+            try { const d = await this.api('/api/dramas'); this.dramas = d.data; this.stats = d.stats; } catch (e) {}
+        },
         async triggerCompress(d) {
-            if (!confirm('对「' + d.title + '」启动压缩？\n已是 H.265 的视频会自动跳过，压缩后更大的会保留原片。')) return;
-            try {
-                const data = await this.api('/api/compress', { method: 'POST', body: { path: d.relative_path } });
-                this.notify(data.msg);
-                this.activeTab = 'tasks';
-            } catch (e) { this.notify('提交失败: ' + e.message, true); }
+            if (!confirm('压缩「' + d.title + '」？\n· 已是 H.265 的视频会自动跳过\n· 压缩后不更小的会保留原片\n· 原片会放进回收站 ' + (this.system.trash_days || 7) + ' 天，可随时撤销')) return;
+            try { const r = await this.api('/api/compress', { method: 'POST', body: { path: d.relative_path, keep_original: true } }); this.notify(r.msg); this.activeTab = 'tasks'; }
+            catch (e) { this.notify('提交失败: ' + e.message, true); }
             this.loadTasks();
         },
         async triggerZip(d) {
-            try {
-                const data = await this.api('/api/zip', { method: 'POST', body: { path: d.relative_path } });
-                this.notify(data.msg);
-                this.activeTab = 'tasks';
-            } catch (e) { this.notify('提交失败: ' + e.message, true); }
+            try { const r = await this.api('/api/zip', { method: 'POST', body: { path: d.relative_path } }); this.notify(r.msg); this.activeTab = 'tasks'; }
+            catch (e) { this.notify('提交失败: ' + e.message, true); }
             this.loadTasks();
         },
+        async deleteDrama(d) {
+            if (!confirm('把「' + d.title + '」(' + d.episodes_count + ' 集, ' + d.size_mb + ' MB) 移入回收站？\n不会真正删除，' + (this.system.trash_days || 7) + ' 天内可恢复。')) return;
+            try {
+                const r = await this.api('/api/dramas/delete', { method: 'POST', body: { path: d.relative_path } });
+                this.notify('已移入回收站', false, { label: '撤销', run: () => this.restoreById(r.trash_id) });
+            } catch (e) { this.notify('删除失败: ' + e.message, true); }
+            this.loadDramas(); this.loadTrash();
+        },
+        async openFolder(rel) {
+            try { await this.api('/api/open', { method: 'POST', body: { path: rel } }); } catch (e) { this.notify(e.message, true); }
+        },
+
+        // ---- 回收站 ----
+        async openTrash() { this.activeTab = 'trash'; await this.loadTrash(); this.loadAudit(); },
+        async loadTrash() {
+            try { const d = await this.api('/api/trash'); this.trash = d.data; this.trashDays = d.retention_days; this.trashMb = d.total_mb; } catch (e) {}
+        },
+        async loadAudit() { try { this.audit = (await this.api('/api/audit?limit=60')).data; } catch (e) {} },
+        async restoreById(id) {
+            try { const r = await this.api('/api/trash/' + id + '/restore', { method: 'POST' }); this.notify(r.msg); }
+            catch (e) { this.notify('恢复失败: ' + e.message, true); }
+            this.loadDramas(); this.loadTrash(); this.loadTasks(); if (this.activeTab === 'trash') this.loadAudit();
+        },
+        async restoreEntry(e) {
+            if (e.kind === 'compress' && !confirm('撤销压缩：换回压缩前的原片，当前(压缩后)的视频会被替换。确定吗？')) return;
+            await this.restoreById(e.id);
+        },
+        async purgeOne(e) {
+            if (!confirm('永久删除「' + e.platform + '/' + e.drama + '」(' + e.size_mb + ' MB)？\n此操作不可恢复！')) return;
+            try { await this.api('/api/trash/purge', { method: 'POST', body: { ids: [e.id], confirm: true } }); this.notify('已永久删除'); }
+            catch (err) { this.notify(err.message, true); }
+            this.loadTrash(); this.loadAudit(); this.loadSystem();
+        },
+        async purgeAll() {
+            if (!confirm('清空回收站？共 ' + this.trash.length + ' 项、' + this.trashMb + ' MB 将被永久删除，无法恢复！')) return;
+            try { const r = await this.api('/api/trash/purge', { method: 'POST', body: { all: true, confirm: true } }); this.notify('已清空，释放 ' + r.freed_mb + ' MB'); }
+            catch (err) { this.notify(err.message, true); }
+            this.loadTrash(); this.loadAudit(); this.loadSystem();
+        },
+
+        // ---- AI 助手 ----
         async sendAIChat() {
             const text = this.aiInput.trim();
             if (!text || this.chatLoading) return;
             this.chatHistory.push({ role: 'user', text });
-            this.aiInput = '';
-            this.chatLoading = true;
+            this.aiInput = ''; this.chatLoading = true;
             try {
                 const data = await this.api('/api/ai/chat', { method: 'POST', body: { message: text } });
                 this.chatHistory.push({ role: 'ai', text: data.reply });
                 if (data.task_id) this.loadTasks();
-            } catch (e) {
-                this.chatHistory.push({ role: 'ai', text: '请求出错: ' + e.message });
-            } finally {
+                this.loadDramas(); this.loadTrash();
+            } catch (e) { this.chatHistory.push({ role: 'ai', text: '请求出错: ' + e.message }); }
+            finally {
                 this.chatLoading = false;
                 this.$nextTick(() => { const b = this.$refs.chatBox; if (b) b.scrollTop = b.scrollHeight; });
             }

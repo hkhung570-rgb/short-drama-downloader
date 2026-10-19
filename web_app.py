@@ -26,6 +26,9 @@ import re
 import json
 import time
 import uuid
+import csv
+import hmac
+import io
 import queue
 import shutil
 import socket
@@ -37,12 +40,14 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
+
+import trash
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOADS_DIR = os.path.abspath(os.environ.get("DL_DOWNLOADS_DIR") or os.path.join(BASE_DIR, "downloads"))
@@ -54,6 +59,8 @@ for _d in (DOWNLOADS_DIR, DATA_DIR, LOG_DIR):
     os.makedirs(_d, exist_ok=True)
 
 WORKERS = max(1, int(os.environ.get("DL_WORKERS", "2") or 2))
+TRASH_DAYS = max(1, int(os.environ.get("DL_TRASH_DAYS", str(trash.DEFAULT_RETENTION_DAYS)) or trash.DEFAULT_RETENTION_DAYS))
+VERSION = "2.2.0"
 MAX_TASKS_KEPT = 200
 LOG_KEEP_LINES = 500
 
@@ -234,6 +241,7 @@ class TaskManager:
                 "result_dirs": [],
                 "error": None,
                 "warning": None,
+                "trash_ids": [],            # 本任务产生的回收站条目 (压缩前原片)，用于“撤销压缩”
             }
             self.tasks[task_id] = task
             self.logs[task_id] = deque(maxlen=LOG_KEEP_LINES)
@@ -267,21 +275,21 @@ class TaskManager:
     def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
         with self.lock:
             t = self.tasks.get(task_id)
-            return dict(t, result_dirs=list(t["result_dirs"])) if t else None
+            return dict(t, result_dirs=list(t["result_dirs"]), trash_ids=list(t.get("trash_ids", []))) if t else None
 
     def list_tasks(self) -> List[Dict[str, Any]]:
         """列表接口只返回摘要(不含日志)，前端每 2.5 秒轮询一次，不能随任务数增长变重。"""
         with self.lock:
             out = []
             for t in reversed(list(self.tasks.values())):
-                item = dict(t, result_dirs=list(t["result_dirs"]))
+                item = dict(t, result_dirs=list(t["result_dirs"]), trash_ids=list(t.get("trash_ids", [])))
                 lg = self.logs.get(t["id"])
                 item["last_log"] = lg[-1] if lg else ""
                 out.append(item)
             return out
 
     def update_task(self, task_id: str, **kwargs):
-        persist = any(k in kwargs for k in ("status", "error", "warning", "result_dirs", "finished_at"))
+        persist = any(k in kwargs for k in ("status", "error", "warning", "result_dirs", "finished_at", "trash_ids"))
         with self.lock:
             t = self.tasks.get(task_id)
             if t is None:
@@ -291,6 +299,14 @@ class TaskManager:
                 t["result_dir"] = kwargs["result_dirs"][0]
         if persist:
             self._save()
+
+    def add_trash_id(self, task_id: str, entry_id: str):
+        with self.lock:
+            t = self.tasks.get(task_id)
+            if t is None:
+                return
+            t.setdefault("trash_ids", []).append(entry_id)
+        self._save()
 
     def append_log(self, task_id: str, line: str):
         clean = line.rstrip("\r\n").strip()
@@ -531,8 +547,12 @@ class ProgressTracker:
             self._set(cur, tot, f"已完成 {cur}/{tot} 集")
 
 
-def _run_compress_stage(task_id: str, dirs: List[str], span_start: int, span_end: int) -> Optional[str]:
-    """压缩 dirs。返回警告文本(无问题返回 None)；被取消返回 'CANCELLED'。"""
+def _run_compress_stage(task_id: str, dirs: List[str], span_start: int, span_end: int,
+                        keep_original: bool = False) -> Optional[str]:
+    """
+    压缩 dirs。返回警告文本(无问题返回 None)；被取消返回 'CANCELLED'。
+    keep_original=True 时，被替换的原片会移入回收站，可在“回收站/任务卡片”里一键撤销。
+    """
     warnings = []
     n = len(dirs)
     for i, d in enumerate(dirs):
@@ -549,11 +569,25 @@ def _run_compress_stage(task_id: str, dirs: List[str], span_start: int, span_end
 
         task_manager.update_task(task_id, current_stage="正在执行硬件加速压缩 (QSV / HEVC)...")
         task_manager.append_log(task_id, f"⚡ 开始压缩: {d}")
-        with task_manager.dir_lock(d), task_manager.compress_sem:
-            if task_manager.is_cancelled(task_id):
-                return "CANCELLED"
-            rc = run_cmd(task_id, [sys.executable, "-u", os.path.join(BASE_DIR, "compress_tool.py"), d, "--replace"],
-                         line_cb=cb, prefix="[压缩] ")
+        cmd = [sys.executable, "-u", os.path.join(BASE_DIR, "compress_tool.py"), d, "--replace"]
+        entry_id = None
+        if keep_original:
+            try:
+                entry_id, backup_dir = trash.begin_compress_backup(
+                    DOWNLOADS_DIR, os.path.basename(os.path.dirname(d)), os.path.basename(d))
+                cmd += ["--backup-dir", backup_dir]
+            except Exception as e:
+                task_manager.append_log(task_id, f"⚠️ 无法创建回收站条目，本次压缩不可撤销: {e}")
+        try:
+            with task_manager.dir_lock(d), task_manager.compress_sem:
+                if task_manager.is_cancelled(task_id):
+                    return "CANCELLED"
+                rc = run_cmd(task_id, cmd, line_cb=cb, prefix="[压缩] ")
+        finally:
+            # 无论成功/取消/异常：有原片被替换就登记为可撤销，否则清掉空条目
+            if entry_id and trash.finalize_compress_backup(DOWNLOADS_DIR, entry_id):
+                task_manager.add_trash_id(task_id, entry_id)
+                task_manager.append_log(task_id, f"↩ 原片已保留在回收站 {TRASH_DAYS} 天内，可随时撤销压缩")
         if rc == -1:
             return "CANCELLED"
         if rc != 0:
@@ -619,7 +653,8 @@ def execute_download(task_id: str, task: Dict[str, Any]):
         if not dirs:
             warnings.append("未能定位剧集目录，已跳过压缩")
         else:
-            w = _run_compress_stage(task_id, dirs, 80, 95 if params.get("auto_zip") else 99)
+            w = _run_compress_stage(task_id, dirs, 80, 95 if params.get("auto_zip") else 99,
+                                    keep_original=bool(params.get("keep_original", False)))
             if w == "CANCELLED":
                 task_manager.finish(task_id, "cancelled")
                 return
@@ -647,7 +682,7 @@ def execute_compress(task_id: str, task: Dict[str, Any]):
     if not is_inside_downloads(d) or not os.path.isdir(d):
         task_manager.finish(task_id, "failed", error="目录不存在或不在下载目录内")
         return
-    w = _run_compress_stage(task_id, [d], 0, 99)
+    w = _run_compress_stage(task_id, [d], 0, 99, keep_original=bool(task["params"].get("keep_original", True)))
     if w == "CANCELLED":
         task_manager.finish(task_id, "cancelled")
     elif w:
@@ -701,18 +736,114 @@ def _detect_encoder_bg():
         SYSTEM_INFO.update(encoder=None, encoder_desc=f"编码器检测失败: {e}")
 
 
+# ---------- 访问口令 (可选) ----------
+# 设置环境变量 DL_TOKEN 后，除 首页、/api/login、/api/health 外的接口与 /media 都需要口令：
+#   Authorization: Bearer <口令> / X-Token: <口令> / 登录后的 cookie。未设置则保持开放(向后兼容)。
+
+# 首页必须开放，否则设置口令后连登录框都打不开；页面本身不含数据
+OPEN_API_PATHS = ("/", "/api/login", "/api/health")
+
+
+def auth_token() -> str:
+    return os.environ.get("DL_TOKEN", "").strip()
+
+
+def is_authed(headers, cookies) -> bool:
+    tok = auth_token()
+    if not tok:
+        return True
+    auth = headers.get("authorization", "")
+    given = auth[7:].strip() if auth.lower().startswith("bearer ") else (headers.get("x-token") or cookies.get("dl_token", ""))
+    return hmac.compare_digest(given.encode("utf-8"), tok.encode("utf-8"))
+
+
+def require_auth(request: Request):
+    if request.url.path in OPEN_API_PATHS:
+        return
+    if not is_authed(request.headers, request.cookies):
+        raise HTTPException(status_code=401, detail="需要访问口令")
+
+
+class AuthedStaticFiles(StaticFiles):
+    async def get_response(self, path, scope):
+        from starlette.requests import HTTPConnection
+        conn = HTTPConnection(scope)
+        if not is_authed(conn.headers, conn.cookies):
+            return Response("需要访问口令", status_code=401)
+        return await super().get_response(path, scope)
+
+
+# ---------- 操作记录 ----------
+# 多人共用时“谁在什么时候做了什么”。只记录会改变数据的操作；前端可通过 X-Operator 头带上操作人姓名。
+
+AUDIT_FILE = os.path.join(DATA_DIR, "audit.log")
+_audit_lock = threading.Lock()
+
+
+def _operator(request: Optional[Request]) -> str:
+    if request is None:
+        return ""
+    return urllib.parse.unquote(request.headers.get("x-operator", ""))[:40]
+
+
+def audit(request: Optional[Request], action: str, detail: str = ""):
+    entry = {
+        "time": now_str(),
+        "ip": (request.client.host if request is not None and request.client else ""),
+        "operator": _operator(request),
+        "action": action,
+        "detail": detail[:300],
+    }
+    with _audit_lock:
+        try:
+            if os.path.isfile(AUDIT_FILE) and os.path.getsize(AUDIT_FILE) > 1024 * 1024:
+                os.replace(AUDIT_FILE, AUDIT_FILE + ".1")
+            with open(AUDIT_FILE, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+
+
+def read_audit(limit: int = 50) -> List[Dict[str, Any]]:
+    try:
+        with open(AUDIT_FILE, "r", encoding="utf-8") as f:
+            lines = f.readlines()[-max(1, min(limit, 500)):]
+    except OSError:
+        return []
+    out = []
+    for ln in reversed(lines):
+        try:
+            out.append(json.loads(ln))
+        except Exception:
+            pass
+    return out
+
+
+def _purge_loop():
+    while True:
+        try:
+            n = trash.purge_expired(DOWNLOADS_DIR, TRASH_DAYS)
+            if n:
+                print(f"🧹 回收站自动清理了 {n} 个超过 {TRASH_DAYS} 天的条目")
+        except Exception as e:
+            print(f"⚠️ 回收站清理失败: {e}")
+        time.sleep(6 * 3600)
+
+
 @asynccontextmanager
 async def lifespan(app_: FastAPI):
     task_manager.start_workers()
     threading.Thread(target=_detect_encoder_bg, daemon=True).start()
+    threading.Thread(target=_purge_loop, daemon=True).start()
     yield
 
 
 app = FastAPI(
     title="Short Drama Downloader & Toolkit",
     description="短剧批量下载与管理平台 Web API 与交互服务",
-    version="2.1.0",
+    version=VERSION,
     lifespan=lifespan,
+    dependencies=[Depends(require_auth)],
 )
 
 # 默认不开放跨域：API 带有“修改磁盘文件”的能力，任意网页都能跨域调用是很危险的。
@@ -721,7 +852,7 @@ if _cors:
     app.add_middleware(CORSMiddleware, allow_origins=_cors, allow_methods=["*"], allow_headers=["*"])
 
 # 挂载静态媒体文件，用于网页直接浏览海报和试看视频
-app.mount("/media", StaticFiles(directory=DOWNLOADS_DIR), name="media")
+app.mount("/media", AuthedStaticFiles(directory=DOWNLOADS_DIR), name="media")
 
 
 # ==================== RESTful API ====================
@@ -730,6 +861,15 @@ class CreateTaskRequest(BaseModel):
     url: str = Field(..., max_length=2048)
     auto_compress: bool = True
     auto_zip: bool = False
+    keep_original: bool = False       # 自动压缩时是否把原片留在回收站(可撤销，但会多占空间)
+    max_eps: Optional[int] = Field(None, ge=1, le=999)
+
+
+class BatchTaskRequest(BaseModel):
+    urls: List[str] = Field(..., min_length=1, max_length=50)
+    auto_compress: bool = True
+    auto_zip: bool = False
+    keep_original: bool = False
     max_eps: Optional[int] = Field(None, ge=1, le=999)
 
 
@@ -737,11 +877,26 @@ class PathRequest(BaseModel):
     path: str = Field(..., max_length=512)
 
 
+class CompressRequest(PathRequest):
+    keep_original: bool = True        # 手动压缩默认保留原片，可在回收站撤销
+
+
+class PurgeRequest(BaseModel):
+    ids: Optional[List[str]] = None
+    all: bool = False
+    confirm: bool = False             # 永久删除必须显式 confirm=true，防止误操作/Agent 误调用
+
+
+class LoginRequest(BaseModel):
+    token: str = Field("", max_length=256)
+
+
 class AIChatRequest(BaseModel):
     message: str = Field(..., max_length=4000)
 
 
-def create_download(url: str, auto_compress: bool, auto_zip: bool, max_eps: Optional[int]):
+def create_download(url: str, auto_compress: bool, auto_zip: bool, max_eps: Optional[int],
+                    keep_original: bool = False):
     """创建(或复用已存在的同目标进行中)下载任务。返回 (task, duplicate)。"""
     try:
         parsed = parse_target(url)
@@ -754,16 +909,26 @@ def create_download(url: str, auto_compress: bool, auto_zip: bool, max_eps: Opti
         "args": parsed["args"],
         "auto_compress": auto_compress,
         "auto_zip": auto_zip,
+        "keep_original": keep_original,
         "max_eps": max_eps,
     })
     task_manager.submit(task["id"])
     return task, False
 
 
-@app.post("/api/tasks")
-def create_download_task(req: CreateTaskRequest):
-    """创建短剧下载任务 (同一目标已有进行中的任务时直接返回该任务)"""
-    task, dup = create_download(req.url, req.auto_compress, req.auto_zip, req.max_eps)
+def _with_undo(task: Dict[str, Any]) -> Dict[str, Any]:
+    """给任务加上 undo_available：它产生的回收站条目是否还在(没被恢复/清理)。"""
+    root = trash.trash_root(DOWNLOADS_DIR)
+    task["undo_available"] = any(os.path.isdir(os.path.join(root, tid)) for tid in task.get("trash_ids", []))
+    return task
+
+
+@app.post("/api/tasks", tags=["任务"], summary="创建下载任务")
+def create_download_task(req: CreateTaskRequest, request: Request):
+    """创建短剧下载任务 (同一目标已有进行中的任务时直接返回该任务，duplicate=true)"""
+    task, dup = create_download(req.url, req.auto_compress, req.auto_zip, req.max_eps, req.keep_original)
+    if not dup:
+        audit(request, "创建下载", f"{task['platform']} {task['target']}")
     return {
         "code": 0,
         "msg": "已有相同的进行中任务" if dup else "任务创建成功",
@@ -773,10 +938,35 @@ def create_download_task(req: CreateTaskRequest):
     }
 
 
-@app.get("/api/tasks")
+@app.post("/api/tasks/batch", tags=["任务"], summary="批量创建下载任务")
+def create_batch_tasks(req: BatchTaskRequest, request: Request):
+    """一次提交多个链接 (最多 50 个)。逐个返回结果：成功/重复/无法识别(含原因)，互不影响。"""
+    results = []
+    for raw in req.urls:
+        text = (raw or "").strip()
+        if not text:
+            continue
+        item: Dict[str, Any] = {"input": text}
+        try:
+            task, dup = create_download(text, req.auto_compress, req.auto_zip, req.max_eps, req.keep_original)
+            item.update(ok=True, task_id=task["id"], duplicate=dup, platform=task["platform"])
+            if not dup:
+                audit(request, "创建下载", f"{task['platform']} {task['target']}")
+        except HTTPException as e:
+            item.update(ok=False, error=e.detail)
+        results.append(item)
+    summary = {
+        "created": sum(1 for r in results if r["ok"] and not r["duplicate"]),
+        "duplicate": sum(1 for r in results if r["ok"] and r["duplicate"]),
+        "failed": sum(1 for r in results if not r["ok"]),
+    }
+    return {"code": 0, "summary": summary, "results": results}
+
+
+@app.get("/api/tasks", tags=["任务"], summary="任务列表")
 def list_tasks():
-    """获取所有任务摘要及实时进度 (不含完整日志)"""
-    return {"code": 0, "data": task_manager.list_tasks()}
+    """获取所有任务摘要及实时进度 (不含完整日志)。undo_available=true 表示可撤销该任务的压缩。"""
+    return {"code": 0, "data": [_with_undo(t) for t in task_manager.list_tasks()]}
 
 
 @app.post("/api/tasks/clear")
@@ -792,15 +982,17 @@ def get_task_detail(task_id: str, tail: int = 300):
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     task["logs"] = task_manager.get_logs(task_id, max(1, min(tail, LOG_KEEP_LINES)))
-    return {"code": 0, "data": task}
+    return {"code": 0, "data": _with_undo(task)}
 
 
 @app.post("/api/tasks/{task_id}/cancel")
-def cancel_task(task_id: str):
-    if not task_manager.get_task(task_id):
+def cancel_task(task_id: str, request: Request):
+    t = task_manager.get_task(task_id)
+    if not t:
         raise HTTPException(status_code=404, detail="任务不存在")
     if not task_manager.cancel(task_id):
         raise HTTPException(status_code=409, detail="任务已结束，无法取消")
+    audit(request, "取消任务", f"#{task_id} {t['target']}")
     return {"code": 0, "msg": "已请求取消"}
 
 
@@ -973,33 +1165,176 @@ def _submit_dir_task(task_type: str, rel_path: str, params: Optional[dict] = Non
     return task, False
 
 
-@app.post("/api/compress")
-def manual_compress(req: PathRequest):
-    """手动对指定短剧目录触发硬件加速压缩 (path 形如 'Reelshort/某某剧')"""
-    task, dup = _submit_dir_task("compress", req.path)
+@app.post("/api/compress", tags=["资产库"], summary="压缩某部剧")
+def manual_compress(req: CompressRequest, request: Request):
+    """
+    对 path ('平台目录/剧集目录') 触发压缩。keep_original=true(默认) 时原片进回收站，可撤销。
+    已是 H.265 的视频自动跳过；压缩后不更小的保留原片。
+    """
+    task, dup = _submit_dir_task("compress", req.path, {"keep_original": req.keep_original})
+    if not dup:
+        audit(request, "压缩", f"{req.path} (保留原片={req.keep_original})")
     return {"code": 0, "msg": "已有相同的进行中任务" if dup else "压缩任务已提交", "duplicate": dup, "task_id": task["id"]}
 
 
-@app.post("/api/zip")
-def manual_zip(req: PathRequest):
+@app.post("/api/zip", tags=["资产库"], summary="打包某部剧为 ZIP")
+def manual_zip(req: PathRequest, request: Request):
     """手动对指定短剧目录打包为 ZIP"""
     task, dup = _submit_dir_task("zip", req.path)
+    if not dup:
+        audit(request, "打包ZIP", req.path)
     return {"code": 0, "msg": "已有相同的进行中任务" if dup else "打包任务已提交", "duplicate": dup, "task_id": task["id"]}
 
 
-@app.get("/api/system")
-def system_info():
-    """运行环境信息：当前使用的编码器、并发数、磁盘剩余空间"""
+def dir_busy(abs_dir: str) -> bool:
+    """该剧目录是否正被任务占用 (排队/运行中的任务目标或结果目录，或持有目录锁)。"""
+    key = os.path.normcase(os.path.realpath(abs_dir))
+    with task_manager.lock:
+        for t in task_manager.tasks.values():
+            if t["status"] not in ("pending", "running"):
+                continue
+            for c in [t["target"]] + list(t.get("result_dirs", [])):
+                if isinstance(c, str) and os.path.isabs(c) and os.path.normcase(os.path.realpath(c)) == key:
+                    return True
+    return task_manager.dir_lock(abs_dir).locked()
+
+
+@app.post("/api/dramas/delete", tags=["资产库"], summary="删除某部剧 (移入回收站，可恢复)")
+def delete_drama(req: PathRequest, request: Request):
+    """不会真正删除：整部剧(含同名 ZIP)移入回收站，保留 DL_TRASH_DAYS 天，期间可恢复。"""
+    abs_path = resolve_drama_dir(req.path)
+    if dir_busy(abs_path):
+        raise HTTPException(status_code=409, detail="这部剧正在下载/处理中，请先取消相关任务")
+    try:
+        entry_id = trash.move_drama_to_trash(DOWNLOADS_DIR, abs_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"移入回收站失败 (文件可能正被播放器/资源管理器占用): {e}")
+    task_manager.dramas_dirty = True
+    audit(request, "删除剧集(进回收站)", req.path)
+    return {"code": 0, "msg": f"已移入回收站，{TRASH_DAYS} 天内可恢复", "trash_id": entry_id, "retention_days": TRASH_DAYS}
+
+
+@app.get("/api/dramas/export.csv", tags=["资产库"], summary="导出资产清单 CSV")
+def export_dramas_csv():
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["平台", "剧名", "目录名", "集数", "大小(MB)", "最近更新", "有ZIP", "路径"])
+    for d in list_all_dramas(max_age=0)["data"]:
+        w.writerow([d["platform"], d["title"], d["folder_name"], d["episodes_count"], d["size_mb"],
+                    d["updated_at"], "是" if d["has_zip"] else "否", d["relative_path"]])
+    return Response(content=buf.getvalue().encode("utf-8-sig"), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="dramas.csv"'})
+
+
+def _is_local(request: Request) -> bool:
+    return (request.client.host if request.client else "") in ("127.0.0.1", "::1", "localhost")
+
+
+@app.post("/api/open", tags=["资产库"], summary="在服务器所在电脑上打开剧集文件夹")
+def open_folder(req: PathRequest, request: Request):
+    """仅限从运行平台的这台电脑本机访问时可用 (同事远程访问时返回 403)。"""
+    if not _is_local(request):
+        raise HTTPException(status_code=403, detail="只能在运行本平台的这台电脑上打开文件夹")
+    abs_path = resolve_drama_dir(req.path)
+    try:
+        if os.name == "nt":
+            os.startfile(abs_path)  # type: ignore[attr-defined]
+        else:
+            subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", abs_path])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"打开失败: {e}")
+    return {"code": 0, "msg": "已打开"}
+
+
+# ---------- 回收站 ----------
+
+def restore_trash_entry(entry_id: str, request: Optional[Request] = None) -> Dict[str, Any]:
+    entries = {e["id"]: e for e in trash.list_entries(DOWNLOADS_DIR, TRASH_DAYS)}
+    e = entries.get(entry_id)
+    if not e:
+        raise HTTPException(status_code=404, detail="回收站里没有这个条目 (可能已被清理)")
+    drama_dir = os.path.join(DOWNLOADS_DIR, e["platform"], e["drama"])
+    if e["kind"] == "compress" and dir_busy(drama_dir):
+        raise HTTPException(status_code=409, detail="这部剧正在处理中，请等任务结束后再撤销")
+    try:
+        m = trash.restore(DOWNLOADS_DIR, entry_id)
+    except trash.TrashError as ex:
+        raise HTTPException(status_code=ex.status, detail=str(ex))
+    except OSError as ex:
+        raise HTTPException(status_code=500, detail=f"恢复失败 (文件可能被占用): {ex}")
+    task_manager.dramas_dirty = True
+    audit(request, "恢复" if m["kind"] == "delete" else "撤销压缩", f"{m['platform']}/{m['drama']}")
+    return m
+
+
+@app.get("/api/trash", tags=["回收站"], summary="回收站列表")
+def list_trash():
+    entries = trash.list_entries(DOWNLOADS_DIR, TRASH_DAYS)
+    return {"code": 0, "data": entries, "retention_days": TRASH_DAYS,
+            "total_mb": round(sum(e["size_mb"] for e in entries), 2)}
+
+
+@app.post("/api/trash/purge", tags=["回收站"], summary="永久删除回收站条目 (不可恢复，需 confirm=true)")
+def purge_trash(req: PurgeRequest, request: Request):
+    if not req.confirm:
+        raise HTTPException(status_code=400, detail="永久删除不可恢复，请传 confirm=true 确认")
+    if not req.all and not req.ids:
+        raise HTTPException(status_code=400, detail="请指定 ids，或 all=true 清空回收站")
+    try:
+        res = trash.purge(DOWNLOADS_DIR, None if req.all else req.ids)
+    except trash.TrashError as ex:
+        raise HTTPException(status_code=ex.status, detail=str(ex))
+    audit(request, "永久删除(回收站)", f"{'全部' if req.all else ','.join(req.ids or [])}，释放 {res['freed_mb']} MB")
+    return {"code": 0, **res}
+
+
+@app.post("/api/trash/{entry_id}/restore", tags=["回收站"], summary="恢复 / 撤销")
+def restore_trash(entry_id: str, request: Request):
+    """kind=delete 恢复被删除的剧集；kind=compress 撤销压缩 (换回原片)。"""
+    m = restore_trash_entry(entry_id, request)
+    return {"code": 0, "msg": "已恢复" if m["kind"] == "delete" else "已撤销压缩，换回原片", "entry": m}
+
+
+@app.get("/api/audit", tags=["系统"], summary="操作记录")
+def api_audit(limit: int = 50):
+    return {"code": 0, "data": read_audit(limit)}
+
+
+# ---------- 登录 / 健康检查 ----------
+
+@app.post("/api/login", tags=["系统"], summary="输入访问口令 (设置了 DL_TOKEN 时)")
+def login(req: LoginRequest, response: Response):
+    tok = auth_token()
+    if tok and not hmac.compare_digest(req.token.encode("utf-8"), tok.encode("utf-8")):
+        raise HTTPException(status_code=401, detail="口令错误")
+    if tok:
+        response.set_cookie("dl_token", tok, httponly=True, samesite="lax", max_age=30 * 86400)
+    return {"code": 0, "msg": "ok"}
+
+
+@app.get("/api/health", tags=["系统"], summary="健康检查 (无需口令)")
+def health(request: Request):
+    return {"ok": True, "version": VERSION, "auth_required": bool(auth_token()),
+            "authed": is_authed(request.headers, request.cookies)}
+
+
+@app.get("/api/system", tags=["系统"], summary="运行环境信息")
+def system_info(request: Request):
+    """当前实际使用的编码器、并发数、磁盘剩余空间、回收站保留天数等"""
     try:
         free_gb = round(shutil.disk_usage(DOWNLOADS_DIR).free / (1024 ** 3), 1)
     except OSError:
         free_gb = None
     return {"code": 0, "data": {
         **SYSTEM_INFO,
+        "version": VERSION,
         "workers": WORKERS,
         "queued": task_manager.queue.qsize(),
         "disk_free_gb": free_gb,
         "downloads_dir": DOWNLOADS_DIR,
+        "trash_days": TRASH_DAYS,
+        "local": _is_local(request),   # 前端据此决定是否显示“打开文件夹”
+        "auth_required": bool(auth_token()),
     }}
 
 
@@ -1010,7 +1345,7 @@ _TASK_QUERY_WORDS = ("任务", "进度", "队列")
 
 
 @app.post("/api/ai/chat")
-def ai_chat(req: AIChatRequest):
+def ai_chat(req: AIChatRequest, request: Request):
     """
     内置轻量级自然语言意图理解器 (支持同事直接发送自然指令)
     可无缝扩充接入大语言模型 (OpenAI / DeepSeek / Claude / Dify)
@@ -1036,6 +1371,8 @@ def ai_chat(req: AIChatRequest):
         except HTTPException as e:
             return {"code": 0, "reply": f"⚠️ 这个链接我处理不了：{e.detail}"}
 
+        if not dup:
+            audit(request, "创建下载(AI助手)", f"{task['platform']} {task['target']}")
         if dup:
             return {"code": 0, "reply": f"ℹ️ 这个链接已经有一个进行中的任务了 (任务ID: `{task['id']}`)，请在任务队列里查看进度。", "task_id": task["id"]}
         parts = [
@@ -1062,6 +1399,27 @@ def ai_chat(req: AIChatRequest):
             "reply": f"🚀 已创建 ReelShort 批量任务：自动探测并下载最新上线的 {num} 部短剧！任务 ID：{task['id']}。",
             "task_id": task["id"],
         }
+
+    # 回收站 / 撤销
+    if "回收站" in msg or any(k in msg for k in ("撤销", "恢复", "还原")):
+        entries = trash.list_entries(DOWNLOADS_DIR, TRASH_DAYS)
+        if any(k in msg for k in ("撤销", "恢复", "还原")):
+            if not entries:
+                return {"code": 0, "reply": "回收站是空的，没有可以撤销/恢复的内容。"}
+            latest = entries[0]
+            try:
+                restore_trash_entry(latest["id"], request)
+            except HTTPException as e:
+                return {"code": 0, "reply": f"⚠️ 没能撤销最近一次操作：{e.detail}"}
+            what = "撤销了压缩，换回原片" if latest["kind"] == "compress" else "恢复了被删除的剧集"
+            return {"code": 0, "reply": f"↩ 已{what}：{latest['platform']}/{latest['drama']}"}
+        if not entries:
+            return {"code": 0, "reply": "🗑 回收站是空的。"}
+        lines = [f"🗑 回收站共 {len(entries)} 项 (保留 {TRASH_DAYS} 天)，最近的："]
+        for e in entries[:5]:
+            lines.append(f"- {'删除' if e['kind'] == 'delete' else '压缩前原片'} · {e['platform']}/{e['drama']} · {e['size_mb']} MB")
+        lines.append("\n对我说“撤销”可恢复最近一项；永久清理请在网页【回收站】操作。")
+        return {"code": 0, "reply": "\n".join(lines)}
 
     # 3. 任务进度查询
     if any(k in msg for k in _TASK_QUERY_WORDS):

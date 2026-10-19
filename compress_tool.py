@@ -224,8 +224,11 @@ def recover_leftovers(video_files):
                 pass
 
 
-def _replace_original(v_path, temp_out):
-    """原子替换：原片→.bak，新片→原名，成功后删 .bak；任一步失败都还原原片。"""
+def _replace_original(v_path, temp_out, backup_dir=None, backup_root=None):
+    """
+    原子替换：原片→.bak，新片→原名；任一步失败都还原原片。
+    成功后：给了 backup_dir 就把原片移入该目录(保留相对 backup_root 的子路径，供“撤销压缩”)，否则直接删除 .bak。
+    """
     bak = v_path + ".bak"
     os.replace(v_path, bak)
     try:
@@ -233,6 +236,15 @@ def _replace_original(v_path, temp_out):
     except Exception:
         os.replace(bak, v_path)
         raise
+    if backup_dir:
+        try:
+            rel = os.path.relpath(v_path, backup_root) if backup_root else os.path.basename(v_path)
+            dst = os.path.join(backup_dir, rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            os.replace(bak, dst)
+            return
+        except Exception as e:
+            print(f"  ⚠️ 无法保留原片用于撤销，原片将被删除: {e}", flush=True)
     try:
         os.remove(bak)
     except OSError:
@@ -247,11 +259,14 @@ def _remove_quiet(path):
         pass
 
 
-def process_path(target_path, codec="hevc", quality=26, replace=False, dry_run=False, force=False):
+def process_path(target_path, codec="hevc", quality=26, replace=False, dry_run=False, force=False,
+                 backup_dir=None):
     """
     批量或单文件处理压缩。返回 (成功数, 跳过数, 失败数)；路径错误返回 None。
+    backup_dir: 仅 replace 模式有效；被替换的原片会移入此目录而不是删除，用于“撤销压缩”。
     """
     target_path = os.path.abspath(target_path)
+    backup_root = target_path if os.path.isdir(target_path) else os.path.dirname(target_path)
     if not os.path.exists(target_path):
         print(f"❌ 路径不存在: {target_path}")
         return None
@@ -339,7 +354,7 @@ def process_path(target_path, codec="hevc", quality=26, replace=False, dry_run=F
             print(f"{tag} 完成! 体积: {new_size / (1024*1024):.2f} MB (节省 {saved_ratio:.1f}%), 耗时 {dur:.1f}s [{used_encoder}]", flush=True)
             try:
                 if replace:
-                    _replace_original(v_path, temp_out)
+                    _replace_original(v_path, temp_out, backup_dir, backup_root)
                 else:
                     os.replace(temp_out, final_out)
             except Exception as e:
@@ -427,6 +442,7 @@ def main():
     parser.add_argument("--crf", type=int, default=26, help="压缩画质质量等级 (默认: 26, 建议 23-30)")
     parser.add_argument("--replace", action="store_true", help="压缩完成后安全替换原视频文件 (体积更小才替换)")
     parser.add_argument("--force", action="store_true", help="即使已是目标编码也重新压缩")
+    parser.add_argument("--backup-dir", help="与 --replace 合用：被替换的原片移入该目录(而不是删除)，便于撤销")
     parser.add_argument("--dry-run", action="store_true", help="预检模式，仅扫描统计待压缩文件")
     parser.add_argument("--zip", help="将指定文件夹快速打包为 .zip 归档文件")
     args = parser.parse_args()
@@ -441,7 +457,8 @@ def main():
         sys.exit(1)
 
     result = process_path(args.target, codec=args.codec, quality=args.crf,
-                          replace=args.replace, dry_run=args.dry_run, force=args.force)
+                          replace=args.replace, dry_run=args.dry_run, force=args.force,
+                          backup_dir=args.backup_dir if args.replace else None)
     if result is None:
         sys.exit(1)
     sys.exit(2 if result[2] > 0 else 0)

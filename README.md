@@ -8,16 +8,19 @@
 
 | 文档 | 给谁看 | 内容 |
 | :--- | :--- | :--- |
-| [使用手册.md](使用手册.md) | 所有同事 | 一页纸上手：启动、下载、看进度、压缩/打包、常见问题 |
+| [使用手册.md](使用手册.md) | 运营/所有同事 | 一页纸上手：启动、批量下载、撤销、回收站、常见问题 |
+| [AGENTS.md](AGENTS.md) | AI Agent / 开发者 | 让 AI 调用本平台：命令行(JSON)、MCP 服务器、REST，含安全约定 |
 | 本 README | 维护者/开发者 | 完整功能、API、命令行、目录规范、扩展开发 |
 | [进展文档.md](进展文档.md) | 项目负责人 | 当前状态、资产统计、近期改动、验证情况、已知问题 |
 | [待办事项.md](待办事项.md) | 维护者 | 按优先级排列的后续工作 |
 | [方案.md](方案.md) | 维护者 | 早期调研与合规风险结论（黄果短剧站点），启用相关功能前请先阅读 |
 
-## 当前状态（2026-10-19）
+## 当前状态（2026-10-19，v2.2.0）
 
-- **已稳定**：Web 平台（任务队列/取消/重试/去重、路径与参数安全校验）、压缩工具（安全替换、跳过已压缩、硬件失败回退 CPU）、ReelShort 与 Slitz 下载器（原子写入、断点续传、失败退出码）。共 26 项自动化测试，见[第七节](#七-测试)。
-- **未纳入本轮加固**：黄果短剧相关脚本（`download_huangguo_video.py`、`compress_huangguo_dramas.py`、`download_interactive.py` 等）保持原状。
+- **运营友好**：一次粘贴多个链接批量下载；**删除和压缩都可撤销**（回收站，默认保留 7 天）；操作记录（谁在何时做了什么）；可选访问口令；导出资产清单 CSV；失败原因直接展示、一键重试续传。
+- **人和 AI 都能用**：同一个后台，网页、命令行（JSON 输出）、MCP 服务器、REST API 四种入口，见 [AGENTS.md](AGENTS.md)。
+- **已稳定**：任务队列（取消/重试/去重/重启恢复）、路径与参数安全校验、压缩安全替换、ReelShort 与 Slitz 下载器（原子写入、断点续传、失败退出码）。共 65 项自动化测试，另做过浏览器界面实测与真实网络冒烟，见[第七节](#七-测试)。
+- **未纳入加固**：黄果短剧相关脚本（`download_huangguo_video.py`、`compress_huangguo_dramas.py`、`download_interactive.py` 等）保持原状。
 - **资产库**：35 部 / 319 集 / 6.62 GB（ReelShort 2、Slitz 23、黄果 10）。
 
 ---
@@ -63,23 +66,24 @@ python web_app.py --port 8000
 python web_app.py --host 127.0.0.1
 ```
 
-> ⚠️ 默认监听 `0.0.0.0`，局域网内任何人都能访问并操作本平台（**没有登录校验**）。只在可信网络里这样用；API 默认**不开放跨域**，如需第三方网页调用请设置环境变量 `DL_CORS_ORIGINS`。
+> ⚠️ 默认监听 `0.0.0.0`，局域网内任何人都能访问并操作本平台。**多人共用/不完全可信的网络请设置访问口令**：`set DL_TOKEN=你的口令`（建议纯英文数字）后再启动，网页会要求输入，API/Agent 用 `Authorization: Bearer <口令>`。API 默认**不开放跨域**，如需第三方网页调用请设置 `DL_CORS_ORIGINS`。
 
-可选环境变量：`DL_WORKERS`（同时执行的任务数，默认 2；压缩阶段始终串行）、`DL_DOWNLOADS_DIR`、`DL_DATA_DIR`（任务记录与日志，默认 `./data`）。
+可选环境变量：`DL_TOKEN`（访问口令）、`DL_WORKERS`（同时执行的任务数，默认 2；压缩阶段始终串行）、`DL_TRASH_DAYS`（回收站保留天数，默认 7）、`DL_DOWNLOADS_DIR`、`DL_DATA_DIR`（任务记录/日志/操作记录，默认 `./data`）。
 启动后终端将输出访问入口：
 - **本机浏览器访问**：`http://127.0.0.1:8000`
 - **局域网同事访问**：`http://<您的局域网IP>:8000`（办公室同事无需配置任何环境，手机/电脑浏览器打开即用）
 
 ---
 
-### 2. 面向全体同事的四大功能模块
+### 2. 面向运营同事的功能模块
 
 | 模块 | 说明 | 亮点体验 |
 | :--- | :--- | :--- |
-| **⚡ 极速下载** | 粘贴任意支持的短剧链接，系统自动识别平台并开始下载 | • 勾选【⚡ 硬件加速智能压缩】：自动启用 Intel QSV 硬件压制，省 70% 空间<br>• 勾选【📦 自动打包 ZIP】：全集下载完自动生成打包文件<br>• 支持限制集数（用于快速试看样片） |
+| **⚡ 极速下载** | 一次粘贴多个链接（一行一个），自动识别平台并开始下载 | • 无法识别的链接会逐条说明原因，不影响其余<br>• 【⚡ 自动压缩】省 50%~70% 空间；【↩ 保留原片】可撤销；【📦 自动 ZIP】<br>• 磁盘不足时顶部红字提醒 |
 | **📋 任务队列** | 实时查看所有下载/转码/打包任务的进度 | • 受控并发（默认同时 2 个，其余排队），同一链接不会重复创建<br>• 动态进度条、失败原因直接展示，支持**取消 / 重试(断点续传) / 删除**<br>• 一键弹窗查看实时日志；服务重启后任务记录与日志仍在，中断的任务可一键重试 |
-| **📚 媒体资产库** | 像流媒体网站一样的海报墙总览 | • 卡片式展示已下载短剧海报、集数、大小、标签<br>• **在线试看**：直接网页播放第 1 集校验画质<br>• **一键打包/下载 ZIP**：方便同事将整部剧一键拷走 |
-| **🤖 AI 助手** | 内置智能意图理解器，支持自然语言直接下达指令 | • 直接发送一句话即可全自动创建任务与查询数据 |
+| **📚 媒体资产库** | 海报墙总览，可搜索/筛选/排序 | • **在线试看**第 1 集校验画质<br>• ⚡压缩（原片留存可撤销）、📦ZIP（内容更新后提示“↻ZIP”过期）、📂打开目录（本机）、🗑删除（进回收站）<br>• 📥 导出清单 CSV |
+| **🗑 回收站** | 删除的剧、压缩前的原片都在这里 | • 保留 7 天内**一键恢复/撤销压缩**（字节级还原），超期自动清理<br>• 永久删除需二次确认；下方“操作记录”显示谁在何时做了什么 |
+| **🤖 AI 助手** | 内置关键字意图识别，用一句话下指令 | • 下载链接、查进度、查资产库、“撤销刚才的操作”<br>• 外部 AI Agent 的接入见 [AGENTS.md](AGENTS.md) |
 
 ---
 
@@ -97,14 +101,35 @@ python web_app.py --host 127.0.0.1
   ➔ **AI 实时统计已归档剧集数、总集数、占用存储空间并汇总反馈。**
 
 #### (2) 标准 RESTful API 列表
-- `POST /api/tasks`：创建短剧下载任务（传入 `{"url": "...", "auto_compress": true, "auto_zip": true, "max_eps": 3}`；`url` 也可为 `--latest 2`；同一目标已有进行中任务时返回该任务并带 `"duplicate": true`；无法识别的站点返回 400）
-- `GET /api/tasks`：获取所有任务摘要及实时进度（不含完整日志）
-- `GET /api/tasks/{id}?tail=300`：任务详情与最近日志
-- `POST /api/tasks/{id}/cancel` · `POST /api/tasks/{id}/retry` · `DELETE /api/tasks/{id}` · `POST /api/tasks/clear`：取消 / 重试 / 删除 / 清除已结束任务
-- `GET /api/dramas`：获取已归档的所有剧集资产及海报地址
-- `POST /api/compress`、`POST /api/zip`：对某个剧集目录压缩 / 打包，body 为 `{"path": "平台目录/剧集目录"}`（如 `"Slitz短剧/room-service"`；越界路径一律 400）
-- `GET /api/system`：当前实际使用的编码器、并发数、磁盘剩余空间
-- `POST /api/ai/chat`：自然语言对话式指令调度端点
+交互式文档：启动后访问 `/docs`（Swagger）、`/openapi.json`。带口令时加请求头 `Authorization: Bearer <口令>`。错误统一为 HTTP 状态码 + `{"detail": "中文原因"}`。
+
+| 方法 · 路径 | 说明 |
+| :--- | :--- |
+| `POST /api/tasks/batch` | **批量**创建下载：`{"urls":[...],"auto_compress":true,"auto_zip":false,"keep_original":false,"max_eps":3}`，逐个返回成功/重复/失败原因 |
+| `POST /api/tasks` | 创建单个下载任务（`url` 也可为 `--latest 2`）；同一目标已有进行中任务时返回该任务并带 `"duplicate": true` |
+| `GET /api/tasks` · `GET /api/tasks/{id}?tail=300` | 任务摘要(不含日志) / 详情+日志；`undo_available` 表示可撤销该任务的压缩 |
+| `POST /api/tasks/{id}/cancel` · `/retry` · `DELETE /api/tasks/{id}` · `POST /api/tasks/clear` | 取消 / 重试(断点续传) / 删除记录 / 清除已结束 |
+| `GET /api/dramas` · `GET /api/dramas/export.csv` | 资产库 / 导出清单 (Excel 可直接打开) |
+| `POST /api/compress` | `{"path":"平台目录/剧目录","keep_original":true}`；原片默认进回收站可撤销 |
+| `POST /api/zip` | `{"path":"平台目录/剧目录"}` |
+| `POST /api/dramas/delete` | `{"path":"..."}` **不会真删**，移入回收站 |
+| `GET /api/trash` · `POST /api/trash/{id}/restore` | 回收站列表 / 恢复被删除的剧或撤销压缩 |
+| `POST /api/trash/purge` | **永久删除**：`{"ids":[...]}` 或 `{"all":true}`，必须带 `"confirm":true` |
+| `GET /api/audit?limit=50` | 操作记录（请求头 `X-Operator: <URL编码的姓名>` 会被记录） |
+| `POST /api/open` | 在服务器电脑上打开剧目录（仅本机访问时可用） |
+| `GET /api/system` · `GET /api/health` | 编码器/磁盘/并发/回收站天数 · 健康检查(无需口令) |
+| `POST /api/login` | 设置了 `DL_TOKEN` 时登录 (设置 cookie) |
+| `POST /api/ai/chat` | 自然语言指令（下载、查进度、查资产库、“撤销刚才的操作”） |
+
+#### (3) 给 AI Agent 用
+同一个平台还提供命令行（所有输出为 JSON）和 MCP 服务器，详见 [AGENTS.md](AGENTS.md)：
+
+```bash
+python dl_cli.py add https://www.slitz.com/shorts/room-service --zip
+python dl_cli.py wait <task_id> --timeout 1800      # 退出码 0=成功 3=失败/超时
+python dl_cli.py delete "Slitz短剧/room-service"     # 进回收站，可 restore
+```
+MCP：把 `mcp_server.py` 配到 Claude Desktop / `.mcp.json` 即可（纯标准库，无需安装 SDK）。
 
 ---
 
@@ -262,6 +287,7 @@ downloads/
   - 已经是目标编码 (HEVC) 的视频自动跳过，避免重复转码损失画质；确需重压加 `--force`。
   - 硬件编码失败或画面比例异常时，自动回退 CPU 编码重试该集。
   - 自动跳过 `_` 开头的备份目录、`.compressed.mp4` 与临时文件。
+  - `--backup-dir DIR`：与 `--replace` 合用，被替换的原片移入该目录而不是删除；Web 平台用它实现“撤销压缩”（原片进 `downloads/_trash/`）。
   - 退出码：`0` 全部成功(含跳过)，`1` 参数/路径错误，`2` 有视频压缩失败。
 
 > **宽高比校验（2026-10-19 起）**：`compress_tool.py` 和 `compress_huangguo_dramas.py` 压缩后都会对比原片的显示宽高比（按 SAR/旋转换算，容差 0.5%）。不一致的结果会被丢弃，原文件保持不动。此前 `hevc_qsv` 路径没有缩放保护，只有《纪念日按摩》受影响，且从未上传或发布。
@@ -434,6 +460,9 @@ python compress_tool.py "downloads/Reelshort/Number One, Nobody" --replace
 ### Q3.3: 资产库里某部剧的海报是占位图？
 ReelShort 的图片 CDN 有时会返回反爬挑战页而不是图片，旧版本会把它存成 `poster.jpg`。现在下载器会校验文件头、不再保存非图片，资产库也会忽略已有的坏文件。需要海报时请手动放一张 `poster.jpg` 到剧集目录。
 
+### Q3.4: 误删了剧 / 压缩后画质不满意怎么办？
+都可以撤销：打开【回收站】点“恢复”或“撤销压缩”（保留期内，默认 7 天）。手动压缩默认保留原片；自动压缩要勾选【压缩时保留原片】才会保留（会多占空间）。永久删除或超过保留期的无法找回。
+
 ### Q4: 遇到某些站点报 403 Forbidden 或 444 错误？
 **解决方案**：通常是反爬机制触发：
 1. 检查 `User-Agent`，尝试移除其中的 `Windows` 关键词。
@@ -449,6 +478,14 @@ ReelShort 的图片 CDN 有时会返回反爬挑战页而不是图片，旧版�
 ## 七、 测试
 
 ```bash
-python -m unittest discover -s tests -v
+python -m unittest discover -s tests -v          # 65 项，约 45 秒
 ```
-测试使用临时目录，不会触碰真实的 `downloads/`。覆盖：站点识别与参数注入防护、路径穿越防护、任务取消/重试/去重、用桩脚本验证“子进程输出 → 进度/目录解析 → 状态流转”、压缩工具的探测/收集/ZIP 逻辑。
+测试使用临时目录，不会触碰真实的 `downloads/`。覆盖：
+
+| 文件 | 内容 |
+| :--- | :--- |
+| `tests/test_web_app.py` | 站点识别与参数注入防护、路径穿越防护、任务取消/重试/去重、桩脚本验证“子进程输出 → 进度/目录解析 → 状态流转”、海报校验、压缩工具探测/收集/ZIP |
+| `tests/test_undo.py` | 回收站（删除→恢复字节级一致、冲突、过期清理）、**真实 ffmpeg 压缩→撤销字节级还原**、批量提交、CSV、访问口令、操作记录、“正在处理的剧不可删除” |
+| `tests/test_agent.py` | 对真实平台子进程测 Python 客户端、命令行(JSON 与退出码)、MCP 握手/工具调用/错误路径/平台宕机 |
+
+另做过的人工验证：浏览器里走通登录、批量提交、压缩→撤销、删除→恢复、回收站与操作记录；真实网络下 Slitz 探测+单集下载、ReelShort 元数据→HLS→MP4。

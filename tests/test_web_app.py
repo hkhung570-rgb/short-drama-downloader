@@ -12,14 +12,7 @@ import textwrap
 import time
 import unittest
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
-
-_TMP = tempfile.TemporaryDirectory()
-os.environ["DL_DOWNLOADS_DIR"] = os.path.join(_TMP.name, "downloads")
-os.environ["DL_DATA_DIR"] = os.path.join(_TMP.name, "data")
-
-import web_app  # noqa: E402
+from _env import TMP as _TMP, web_app  # noqa: E402  (必须先于其它导入：设置临时目录环境变量)
 import compress_tool  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
