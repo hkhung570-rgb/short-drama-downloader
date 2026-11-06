@@ -198,7 +198,7 @@ python download_slitz.py https://www.slitz.com/shorts/drama-a https://www.slitz.
 ---
 
 ### 3. 黄果短剧 (AI短剧与互动剧)
-- **播放入口**：`https://nv5et.wrjmtnebd.cc/`、`https://huangguo.me/`、`https://huangguodrama.ai/`
+- **播放入口**：`https://nv5et.wrjmtnebd.cc/`、`https://huangguodrama.ai/`
 - **脚本程序**：
   - 单剧全集下载：[`download_huangguo_video.py`](download_huangguo_video.py)
   - 网页版解析：[`prototype/hg.py`](prototype/hg.py) / [`download_drama.py`](download_drama.py)
@@ -227,12 +227,12 @@ python download_interactive.py https://huangguodrama.ai/en/interactive/hehuan-se
 ```
 
 > 黄果站点状态（2026-11）：`huangguodrama.ai` 互动页可解析 19 个视频节点；
-> `nv5et.wrjmtnebd.cc` 具体剧页可解析剧名、集数和 `videoSrc`；`huangguo.me` 页面可访问，
-> 但详情页下载适配器仍在研究中。网页可访问不等于已接入下载器。
+> `nv5et.wrjmtnebd.cc` 具体剧页可解析剧名、集数和 `videoSrc`。`huangguo.me` 因未解锁时不返回
+> `videoUrl`，已从当前支持清单排除，不作为可下载来源。网页可访问不等于已接入下载器。
 
 > Trạng thái Huangguo (2026-11): trang interactive của `huangguodrama.ai` phân tích được 19 node video;
-> trang phim của `nv5et.wrjmtnebd.cc` lấy được tên phim, số tập và `videoSrc`; `huangguo.me` truy cập được
-> nhưng adapter tải trang chi tiết vẫn đang nghiên cứu. Website mở được không có nghĩa là đã tích hợp tải.
+> trang phim của `nv5et.wrjmtnebd.cc` lấy được tên phim, số tập và `videoSrc`. Do `huangguo.me` không trả
+> `videoUrl` khi chưa mở khóa, domain này đã bị loại khỏi danh sách hỗ trợ hiện tại.
 
 ---
 
