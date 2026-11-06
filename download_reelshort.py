@@ -136,8 +136,22 @@ def get_latest_dramas(limit=2):
     return selected
 
 def get_drama_metadata(book_id_or_url):
-    m = re.search(r'(?:movie|full-episodes|book)/([a-zA-Z0-9]+)', str(book_id_or_url))
-    book_id = m.group(1) if m else str(book_id_or_url).strip()
+    raw_input = str(book_id_or_url).strip()
+    m = re.search(r'(?:movie|full-episodes|book)/([a-zA-Z0-9]+)', raw_input)
+    if not m and "/episodes/" in raw_input:
+        # ReelShort 新版分享链接使用 /episodes/<slug>-<book_id>-<chapter_id>。
+        # 先读取 episode 页的 Next 数据，再用真实 book_id 请求剧目页。
+        episode_html = http_get(raw_input).decode("utf-8", "ignore")
+        episode_data = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', episode_html)
+        if not episode_data:
+            raise RuntimeError(f"未能解析剧集页面: {raw_input}")
+        episode_props = json.loads(episode_data.group(1))["props"]["pageProps"]
+        episode_meta = episode_props.get("data") or {}
+        book_id = str(episode_meta.get("book_id") or episode_meta.get("s_book_id") or "").strip()
+        if not book_id:
+            raise RuntimeError(f"剧集页面缺少 book_id: {raw_input}")
+    else:
+        book_id = m.group(1) if m else raw_input
     
     movie_url = f"https://www.reelshort.com/movie/{book_id}"
     html = http_get(movie_url).decode("utf-8", "ignore")
