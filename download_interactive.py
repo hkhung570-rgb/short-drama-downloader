@@ -15,7 +15,7 @@ import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
-UA = "Mozilla/5.0"
+UA = os.environ.get("DL_HG_UA", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15")
 TARGET_URL = "https://huangguodrama.ai/en/interactive/hehuan-sect/"
 
 NODE_NAME_MAP = {
@@ -41,9 +41,20 @@ NODE_NAME_MAP = {
 }
 
 def fetch_html(url):
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return resp.read().decode("utf-8", "ignore")
+    last_error = None
+    for attempt in range(4):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "text/html,application/xhtml+xml"})
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                body = resp.read()
+                if resp.status < 200 or resp.status >= 300 or not body:
+                    raise RuntimeError(f"HTTP {resp.status} empty response")
+                return body.decode("utf-8", "ignore")
+        except Exception as exc:
+            last_error = exc
+            if attempt < 3:
+                time.sleep(1 + attempt)
+    raise RuntimeError(f"无法读取页面: {last_error}")
 
 def extract_interactive_data(html):
     # unescape Next.js stream
@@ -84,29 +95,35 @@ def download_file(url, out_path, desc=""):
         print(f"  [跳过已存在] {desc}")
         return True
     
-    tmp_path = out_path + ".tmp"
+    tmp_path = out_path + ".part"
     for attempt in range(3):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": UA})
+            req = urllib.request.Request(url, headers={"User-Agent": UA, "Referer": TARGET_URL})
             with urllib.request.urlopen(req, timeout=25) as r, open(tmp_path, "wb") as f:
+                if r.status < 200 or r.status >= 300:
+                    raise RuntimeError(f"HTTP {r.status}")
                 block_size = 64 * 1024
                 while True:
                     chunk = r.read(block_size)
                     if not chunk:
                         break
                     f.write(chunk)
+            if os.path.getsize(tmp_path) < 1024:
+                raise RuntimeError("响应为空或文件过小")
             os.replace(tmp_path, out_path)
             size_mb = os.path.getsize(out_path) / (1024 * 1024)
             print(f"  [下载完成] {desc} ({size_mb:.2f} MB)")
             return True
-        except Exception as e:
-            time.sleep(2)
+        except Exception:
+            time.sleep(2 + attempt)
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
     print(f"  [下载失败] {desc}")
     return False
 
-def main():
+def main(target_url=TARGET_URL):
+    global TARGET_URL
+    TARGET_URL = target_url
     print(f"=== 正在解析互动短剧: {TARGET_URL} ===")
     html = fetch_html(TARGET_URL)
     nodes, raw_videos = extract_interactive_data(html)
@@ -184,6 +201,13 @@ def main():
     print(f"成功: {success_count}/{len(tasks_info)} 个分支视频")
     print(f"耗时: {elapsed:.1f} 秒")
     print(f"保存目录: {out_dir}")
+    if not tasks_info:
+        raise RuntimeError("页面中未找到可下载的视频节点")
 
 if __name__ == "__main__":
-    main()
+    import sys
+    try:
+        main(sys.argv[1] if len(sys.argv) > 1 else TARGET_URL)
+    except Exception as exc:
+        print(f"下载失败: {exc}")
+        raise SystemExit(1)

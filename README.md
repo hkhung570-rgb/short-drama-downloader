@@ -9,6 +9,7 @@
 | 文档 | 给谁看 | 内容 |
 | :--- | :--- | :--- |
 | [使用说明.md](使用说明.md) | 管理员 + 运营 | **完整指南**：安装启动、设置、按场景的操作步骤（含撤销）、AI 使用、故障排查、备份 |
+| [Hướng dẫn sử dụng tiếng Việt.md](Hướng dẫn sử dụng tiếng Việt.md) | Đồng nghiệp Việt Nam | Hướng dẫn ngắn bằng tiếng Việt, ưu tiên dùng ChatGPT để quản lý nền tảng |
 | [接手手册.md](接手手册.md) | 新电脑 + 新 AI | 代码、数据、配置迁移，以及另一台电脑/另一位 AI 的接手步骤 |
 | [使用手册.md](使用手册.md) | 运营/所有同事 | 一页纸上手：启动、批量下载、撤销、回收站、常见问题 |
 | [AGENTS.md](AGENTS.md) | AI Agent / 开发者 | 让 AI 调用本平台：命令行(JSON)、MCP 服务器、REST，含安全约定 |
@@ -16,6 +17,14 @@
 | [进展文档.md](进展文档.md) | 项目负责人 | 当前状态、资产统计、近期改动、验证情况、已知问题 |
 | [待办事项.md](待办事项.md) | 维护者 | 按优先级排列的后续工作 |
 | [方案.md](方案.md) | 维护者 | 早期调研与合规风险结论（黄果短剧站点），启用相关功能前请先阅读 |
+
+## 越南同事沟通约定
+
+越南同事后续可直接用中文或越南语与 ChatGPT 沟通。默认采用**中越双语**回复：先说明中文结果，再给出对应的越南语内容；命令、URL、`task_id`、路径和错误代码保持原样，方便直接复制执行。每次涉及下载、压缩、打包、恢复或删除时，ChatGPT 应返回任务状态和下一步建议；永久删除（`purge`）等不可恢复操作必须先取得明确同意。详细的越南语操作流程见 [Hướng dẫn sử dụng tiếng Việt.md](Hướng dẫn sử dụng tiếng Việt.md)。
+
+### Quy ước giao tiếp với đồng nghiệp Việt Nam
+
+Đồng nghiệp Việt Nam có thể trao đổi với ChatGPT bằng tiếng Trung hoặc tiếng Việt. Mặc định ChatGPT trả lời **song ngữ Trung–Việt**: nêu kết quả bằng tiếng Trung trước, sau đó cung cấp nội dung tiếng Việt tương ứng. Lệnh, URL, `task_id`, đường dẫn và mã lỗi phải được giữ nguyên để có thể sao chép. Với mọi thao tác tải xuống, nén, đóng gói, khôi phục hoặc xóa, ChatGPT phải báo trạng thái tác vụ và bước tiếp theo; các thao tác không thể khôi phục như `purge` phải được xác nhận rõ ràng trước khi thực hiện. Xem quy trình chi tiết tại [Hướng dẫn sử dụng tiếng Việt.md](Hướng dẫn sử dụng tiếng Việt.md)。
 
 ## 当前状态（2026-10-19，v2.2.0）
 
@@ -196,10 +205,11 @@ python download_slitz.py https://www.slitz.com/shorts/drama-a https://www.slitz.
   - 互动分支剧：[`download_interactive.py`](download_interactive.py)
   - 文档与资产补全：[`prototype/generate_huangguo_docs.py`](prototype/generate_huangguo_docs.py)
 - **核心能力**：
-  - 绕过 Cloudflare 针对 Windows UA 的拦截策略。
+  - 使用可配置的非 Windows UA（`DL_HG_UA`），降低站点返回 `444` 的概率，并支持 `Referer`。
   - 自动解析 M3U8 清单中的 `#EXT-X-KEY:METHOD=AES-128`，动态拉取鉴权 Key，基于 Crypto 并发解密切片。
-  - 12 线程并发拉取切片，内置 FFmpeg 自动转封装为 MP4。
-  - 支持多分支选择互动剧（生成完整剧情走向树与选项清单）。
+  - 支持 M3U8 master playlist 展开、分片缺失检测、失败重试和 FFmpeg 自动转封装为 MP4。
+  - 使用 `.part` 临时文件并在成功后原子改名，避免半成品覆盖正式视频。
+  - 支持多分支选择互动剧（生成完整剧情走向树与选项清单），页面请求和视频下载均带重试与 HTTP 校验。
 
 #### 使用命令：
 ```bash
@@ -211,7 +221,18 @@ python download_huangguo_video.py https://nv5et.wrjmtnebd.cc/video/8714/ https:/
 
 # 3. 下载互动短剧分支片段
 python download_interactive.py
+
+# 4. 指定互动短剧 URL（站点地址变化时无需修改源码）
+python download_interactive.py https://huangguodrama.ai/en/interactive/hehuan-sect/
 ```
+
+> 黄果站点状态（2026-11）：`huangguodrama.ai` 互动页可解析 19 个视频节点；
+> `nv5et.wrjmtnebd.cc` 具体剧页可解析剧名、集数和 `videoSrc`；`huangguo.me` 页面可访问，
+> 但详情页下载适配器仍在研究中。网页可访问不等于已接入下载器。
+
+> Trạng thái Huangguo (2026-11): trang interactive của `huangguodrama.ai` phân tích được 19 node video;
+> trang phim của `nv5et.wrjmtnebd.cc` lấy được tên phim, số tập và `videoSrc`; `huangguo.me` truy cập được
+> nhưng adapter tải trang chi tiết vẫn đang nghiên cứu. Website mở được không có nghĩa là đã tích hợp tải.
 
 ---
 

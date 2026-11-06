@@ -21,7 +21,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from Crypto.Cipher import AES
 import imageio_ffmpeg
 
-UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+# Huangguo 曾对带 Windows 标识的 UA 返回 444；使用通用 macOS Safari UA。
+UA = os.environ.get("DL_HG_UA", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15")
 FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 
 def http_get(url, referer=None, retries=5, timeout=20):
@@ -32,11 +33,32 @@ def http_get(url, referer=None, retries=5, timeout=20):
         try:
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return resp.read()
+                body = resp.read()
+                if resp.status < 200 or resp.status >= 300 or not body:
+                    raise RuntimeError(f"HTTP {resp.status} empty response: {url}")
+                return body
         except Exception as e:
             if i == retries - 1:
                 raise
             time.sleep(1 + i * 0.5)
+
+def fetch_playlist(url, referer):
+    """读取并展开 master playlist，返回最终媒体 playlist 内容和 URL。"""
+    body = http_get(url, referer=referer)
+    text = body.decode("utf-8", "ignore")
+    if "#EXT-X-STREAM-INF" not in text:
+        return body, url
+    variants = []
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith("#EXT-X-STREAM-INF") and i + 1 < len(lines):
+            candidate = lines[i + 1].strip()
+            if candidate and not candidate.startswith("#"):
+                variants.append(candidate)
+    if not variants:
+        raise RuntimeError(f"M3U8 master playlist has no variants: {url}")
+    child_url = urllib.parse.urljoin(url, variants[0])
+    return http_get(child_url, referer=referer), child_url
 
 def sanitize_filename(name):
     return re.sub(r'[\\/*?:"<>|]', '_', name).strip()
@@ -84,8 +106,10 @@ def download_episode(ep_num, total_eps, m3u8_url, out_mp4, referer):
         return True
 
     print(f"[{ep_num:02d}/{total_eps:02d}] 正在解析 m3u8: {m3u8_url}")
-    m3u8_bytes = http_get(m3u8_url, referer=referer)
-    key_url, iv, segments = parse_m3u8(m3u8_bytes, m3u8_url)
+    m3u8_bytes, media_url = fetch_playlist(m3u8_url, referer)
+    key_url, iv, segments = parse_m3u8(m3u8_bytes, media_url)
+    if not segments:
+        raise RuntimeError(f"M3U8 contains no media segments: {m3u8_url}")
     
     key = None
     if key_url:
@@ -93,7 +117,7 @@ def download_episode(ep_num, total_eps, m3u8_url, out_mp4, referer):
         
     print(f"[{ep_num:02d}/{total_eps:02d}] 共 {len(segments)} 个分片，开始并行下载与解密...")
     
-    ts_temp = out_mp4 + ".temp.ts"
+    ts_temp = out_mp4 + ".part.ts"
     results = {}
     with ThreadPoolExecutor(max_workers=12) as executor:
         futures = {
@@ -106,6 +130,8 @@ def download_episode(ep_num, total_eps, m3u8_url, out_mp4, referer):
 
     with open(ts_temp, "wb") as f_out:
         for seq, _ in segments:
+            if seq not in results:
+                raise RuntimeError(f"missing segment sequence {seq}")
             f_out.write(results[seq])
             
     print(f"[{ep_num:02d}/{total_eps:02d}] 正在无损转封装为 MP4...")
@@ -118,6 +144,8 @@ def download_episode(ep_num, total_eps, m3u8_url, out_mp4, referer):
         "-movflags", "+faststart",
         out_mp4
     ]
+    out_temp = out_mp4 + ".part.mp4"
+    cmd[-1] = out_temp
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if res.returncode != 0:
         cmd_fallback = [
@@ -125,13 +153,13 @@ def download_episode(ep_num, total_eps, m3u8_url, out_mp4, referer):
             "-y",
             "-i", ts_temp,
             "-c", "copy",
-            out_mp4
+            out_temp
         ]
         res_fb = subprocess.run(cmd_fallback, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if res_fb.returncode != 0:
-            os.rename(ts_temp, out_mp4)
-            return True
+            raise RuntimeError("ffmpeg remux failed: " + res_fb.stderr.decode("utf-8", "ignore")[-500:])
 
+    os.replace(out_temp, out_mp4)
     if os.path.exists(ts_temp):
         os.remove(ts_temp)
         
@@ -250,3 +278,5 @@ if __name__ == "__main__":
             download_drama(u)
         except Exception as err:
             print(f"下载失败 {u}: {err}")
+            exit_code = 1
+    raise SystemExit(exit_code if 'exit_code' in locals() else 0)
