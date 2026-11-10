@@ -12,6 +12,7 @@
 | [Hướng dẫn sử dụng tiếng Việt.md](Hướng dẫn sử dụng tiếng Việt.md) | Đồng nghiệp Việt Nam | Hướng dẫn ngắn bằng tiếng Việt, ưu tiên dùng ChatGPT để quản lý nền tảng |
 | [接手手册.md](接手手册.md) | 新电脑 + 新 AI | 代码、数据、配置迁移，以及另一台电脑/另一位 AI 的接手步骤 |
 | [使用手册.md](使用手册.md) | 运营/所有同事 | 一页纸上手：启动、批量下载、撤销、回收站、常见问题 |
+| [架构图.md](架构图.md) | 维护者/开发者/AI | Web、CLI、MCP、REST、下载器、任务队列和资产库关系 |
 | [AGENTS.md](AGENTS.md) | AI Agent / 开发者 | 让 AI 调用本平台：命令行(JSON)、MCP 服务器、REST，含安全约定 |
 | 本 README | 维护者/开发者 | 完整功能、API、命令行、目录规范、扩展开发 |
 | [进展文档.md](进展文档.md) | 项目负责人 | 当前状态、资产统计、近期改动、验证情况、已知问题 |
@@ -26,17 +27,20 @@
 
 Đồng nghiệp Việt Nam có thể trao đổi với ChatGPT bằng tiếng Trung hoặc tiếng Việt. Mặc định ChatGPT trả lời **song ngữ Trung–Việt**: nêu kết quả bằng tiếng Trung trước, sau đó cung cấp nội dung tiếng Việt tương ứng. Lệnh, URL, `task_id`, đường dẫn và mã lỗi phải được giữ nguyên để có thể sao chép. Với mọi thao tác tải xuống, nén, đóng gói, khôi phục hoặc xóa, ChatGPT phải báo trạng thái tác vụ và bước tiếp theo; các thao tác không thể khôi phục như `purge` phải được xác nhận rõ ràng trước khi thực hiện. Xem quy trình chi tiết tại [Hướng dẫn sử dụng tiếng Việt.md](Hướng dẫn sử dụng tiếng Việt.md)。
 
-## 当前状态（2026-10-19，v2.2.0）
+## 当前状态（2026-11-10，v2.2.0）
 
 - **运营友好**：一次粘贴多个链接批量下载；**删除和压缩都可撤销**（回收站，默认保留 7 天）；操作记录（谁在何时做了什么）；可选访问口令；导出资产清单 CSV；失败原因直接展示、一键重试续传。
 - **人和 AI 都能用**：同一个后台，网页、命令行（JSON 输出）、MCP 服务器、REST API 四种入口，见 [AGENTS.md](AGENTS.md)。
 - **已稳定**：任务队列（取消/重试/去重/重启恢复）、路径与参数安全校验、压缩安全替换、ReelShort 与 Slitz 下载器（原子写入、断点续传、失败退出码）。共 65 项自动化测试，另做过浏览器界面实测与真实网络冒烟，见[第七节](#七-测试)。
 - **未纳入加固**：黄果短剧相关脚本（`download_huangguo_video.py`、`compress_huangguo_dramas.py`、`download_interactive.py` 等）保持原状。
 - **资产库**：35 部 / 319 集 / 6.62 GB（ReelShort 2、Slitz 23、黄果 10）。
+- **架构说明**：网页、CLI、MCP 和 REST 共用同一个 FastAPI 后台，完整关系见 [架构图.md](架构图.md)。
+- **站点提示**：站点适配器已经接入，但具体剧目是否可下载取决于页面是否提供当前可用的播放地址；`huangguo.me` 的页面结构变化可能触发 `videoInitialData` 解析错误。
 
 ---
 
 ## 目录 (Table of Contents)
+- [架构图](架构图.md)
 - [一、 平台概览与快速启动 (Web & AI)](#一-平台概览与快速启动-web--ai)
   - [1. 快速启动 Web 服务](#1-快速启动-web-服务)
   - [2. 面向全体同事的四大功能模块](#2-面向全体同事的四大功能模块)
