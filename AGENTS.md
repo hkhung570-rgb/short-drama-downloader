@@ -4,6 +4,14 @@
 
 本项目是一个短剧下载 / 压缩 / 资产管理平台。运营人员用网页操作；AI Agent 有三种等价的接入方式，**都是同一个后台、同一套数据**，所以人和 Agent 可以同时使用。
 
+## 沟通语言约定
+
+与越南同事沟通时，默认使用**中文和越南语双语回复**：先给出中文内容，再给出对应的越南语内容。命令、URL、`task_id`、文件路径和错误代码保持原样，便于复制执行。涉及下载、压缩、打包、恢复、删除或其他平台操作时，双语说明结果、任务状态和下一步建议；`purge` 等不可恢复操作必须先取得用户明确同意。
+
+### Quy ước ngôn ngữ giao tiếp
+
+Khi trao đổi với đồng nghiệp Việt Nam, mặc định phải trả lời **song ngữ Trung–Việt**: viết nội dung tiếng Trung trước, sau đó viết nội dung tiếng Việt tương ứng. Giữ nguyên lệnh, URL, `task_id`, đường dẫn tệp và mã lỗi để có thể sao chép. Với các thao tác tải xuống, nén, đóng gói, khôi phục, xóa hoặc thao tác khác trên nền tảng, phải thông báo song ngữ về kết quả, trạng thái tác vụ và bước tiếp theo; các thao tác không thể khôi phục như `purge` phải được người dùng xác nhận rõ ràng trước.
+
 前提：平台已启动（`启动下载平台.bat` 或 `python web_app.py`），默认地址 `http://127.0.0.1:8000`。
 
 | 方式 | 适合 | 入口 |

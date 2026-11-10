@@ -10,6 +10,7 @@ __pycache__/
 Gopeed/
 
 # 临时文件
+tmp_*
 *.tmp
 *.part
 *.temp.mp4
